@@ -16,7 +16,9 @@ export async function analyzeRepository(
   if (llmConfig) {
     notes.push(`LLM-first analysis enabled using the configured ${llmConfig.model} model.`);
     try {
-      findings = await analyzeRepositoryWithLlm(snapshot, llmConfig);
+      const analysis = await analyzeRepositoryWithLlm(snapshot, llmConfig);
+      findings = analysis.findings;
+      notes.push(...analysis.notes);
       if (!findings.length) {
         notes.push("The model did not return any concrete vulnerabilities for the reviewed repository chunks.");
       }

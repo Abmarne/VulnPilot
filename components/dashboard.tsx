@@ -378,6 +378,13 @@ function FindingCard({ finding }: { finding: Finding }) {
       </div>
 
       <div className="findingContent">
+        {finding.triageNote ? (
+          <section className="contentCard contentCardFull">
+            <span className="label">Why this is worth reviewing</span>
+            <p>{finding.triageNote}</p>
+          </section>
+        ) : null}
+
         <section className="contentCard">
           <span className="label">Why this matters</span>
           <p>{finding.whyItMatters}</p>

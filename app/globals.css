@@ -557,16 +557,39 @@ body {
   margin-bottom: 1.5rem;
   position: relative;
   z-index: 1;
+  min-width: 0;
 }
 
 .contentCard {
   background-color: var(--surface-low);
   padding: 1.5rem;
   border-radius: var(--radius-lg);
+  min-width: 0;
+  overflow: hidden;
 }
 
-.contentCard .label { display: block; margin-bottom: 0.75rem; color: var(--primary-focus); }
-.contentCard p { margin: 0; font-size: 0.875rem; color: var(--on-surface-variant); line-height: 1.6; }
+.contentCardFull {
+  grid-column: 1 / -1;
+}
+
+.contentCard .label {
+  display: block;
+  margin-bottom: 0.75rem;
+  color: var(--primary-focus);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.contentCard p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--on-surface-variant);
+  line-height: 1.6;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 
 .evidenceBlock {
   background-color: var(--surface-lowest);

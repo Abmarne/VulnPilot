@@ -30,6 +30,9 @@ function toMarkdown(scan: NonNullable<Awaited<ReturnType<typeof getScan>>>) {
     lines.push(`- Category: ${escapeMarkdown(finding.category)}`);
     lines.push(`- CWE: ${escapeMarkdown(finding.cwe)}`);
     lines.push(`- OWASP: ${escapeMarkdown(finding.owasp)}`);
+    if (finding.triageNote) {
+      lines.push(`- Review note: ${escapeMarkdown(finding.triageNote)}`);
+    }
     lines.push(`- Why it matters: ${escapeMarkdown(finding.whyItMatters)}`);
     lines.push(`- Suggested fix: ${escapeMarkdown(finding.suggestedFix)}`);
     lines.push("");

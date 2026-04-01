@@ -43,6 +43,7 @@ export interface Finding {
   file: string;
   line: number;
   evidence: string;
+  triageNote?: string;
   whyItMatters: string;
   suggestedFix: string;
   source: FindingSource;
