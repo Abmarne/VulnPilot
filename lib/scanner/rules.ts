@@ -100,11 +100,79 @@ const RULES: Rule[] = [
     pattern: /(fetch|axios\.(get|post))\(\s*req\.(body|query|params)|requests\.(get|post)\(\s*request\.(args|form|json)/i,
     whyItMatters: "Server-side requests to attacker-controlled URLs can expose internal services and cloud metadata.",
     suggestedFix: "Validate outbound destinations against an allowlist and block private-network or link-local addresses."
+  },
+  {
+    id: "path-traversal",
+    title: "Potential path traversal in file system access",
+    severity: "high",
+    confidence: "needs_review",
+    category: "path_traversal",
+    cwe: "CWE-22",
+    owasp: "A01:2021 Broken Access Control",
+    source: "custom_rules",
+    appliesTo: ["javascript", "typescript", "python", "php"],
+    pattern:
+      /(fs\.(readFile|readFileSync|writeFile|writeFileSync|createReadStream|unlink|unlinkSync)\(\s*(req|request)\.(body|query|params)|open\(\s*(request\.(args|form)|input))/i,
+    whyItMatters: "Using attacker-controlled file paths can expose sensitive files or overwrite application data.",
+    suggestedFix: "Resolve paths against a fixed base directory, normalize them, and reject traversal sequences like ../ before access."
+  },
+  {
+    id: "unsafe-deserialization",
+    title: "Potential unsafe deserialization primitive",
+    severity: "high",
+    confidence: "needs_review",
+    category: "deserialization",
+    cwe: "CWE-502",
+    owasp: "A08:2021 Software and Data Integrity Failures",
+    source: "custom_rules",
+    appliesTo: ["javascript", "typescript", "python", "php", "java"],
+    pattern: /yaml\.load\(|pickle\.loads\(|ObjectInputStream\(|unserialize\(/i,
+    whyItMatters: "Unsafe deserialization can let attackers trigger unintended object behavior, denial of service, or code execution.",
+    suggestedFix: "Use safe parsing APIs, deserialize only trusted formats, and enforce strict type validation on untrusted data."
+  },
+  {
+    id: "weak-crypto",
+    title: "Weak cryptographic primitive detected",
+    severity: "medium",
+    confidence: "likely",
+    category: "weak_crypto",
+    cwe: "CWE-327",
+    owasp: "A02:2021 Cryptographic Failures",
+    source: "custom_rules",
+    appliesTo: ["javascript", "typescript", "python", "java", "php"],
+    pattern: /createHash\(\s*["'](md5|sha1)["']\s*\)|\b(md5|sha1)\s*\(/i,
+    whyItMatters: "Legacy hashes such as MD5 and SHA-1 are no longer appropriate for security-sensitive uses like signatures, passwords, or integrity guarantees.",
+    suggestedFix: "Replace weak hashes with modern primitives such as SHA-256 or Argon2/bcrypt depending on the security use case."
+  },
+  {
+    id: "open-redirect",
+    title: "Potential open redirect using untrusted input",
+    severity: "medium",
+    confidence: "needs_review",
+    category: "open_redirect",
+    cwe: "CWE-601",
+    owasp: "A01:2021 Broken Access Control",
+    source: "custom_rules",
+    appliesTo: ["javascript", "typescript", "python", "php"],
+    pattern:
+      /(redirect|res\.redirect)\(\s*(req|request)\.(query|body|params)|return\s+redirect\(\s*(request\.(args|form)|req\.(query|body|params))/i,
+    whyItMatters: "Open redirects can be chained into phishing, token theft, or access-control bypass flows.",
+    suggestedFix: "Allow only known internal redirect destinations or map short server-side identifiers to trusted URLs."
   }
 ];
 
 function lineNumberFor(content: string, index: number) {
   return content.slice(0, index).split("\n").length;
+}
+
+function makeGlobal(pattern: RegExp) {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  return new RegExp(pattern.source, flags);
+}
+
+function evidenceSnippet(content: string, start: number, length: number) {
+  const snippet = content.slice(start, start + Math.max(length, 1)).replace(/\s+/g, " ").trim();
+  return snippet.slice(0, 220);
 }
 
 export function scanRuleMatches(files: RepoFile[]) {
@@ -113,25 +181,38 @@ export function scanRuleMatches(files: RepoFile[]) {
   for (const file of files) {
     for (const rule of RULES) {
       if (!rule.appliesTo.includes(file.language)) continue;
-      const match = rule.pattern.exec(file.content);
-      if (!match) continue;
+      const matcher = makeGlobal(rule.pattern);
+      const seenLines = new Set<number>();
+      let match: RegExpExecArray | null;
 
-      findings.push({
-        id: createId(rule.id),
-        title: rule.title,
-        severity: rule.severity,
-        confidence: rule.confidence,
-        category: rule.category,
-        cwe: rule.cwe,
-        owasp: rule.owasp,
-        file: file.path,
-        line: lineNumberFor(file.content, match.index),
-        evidence: match[0].slice(0, 220),
-        whyItMatters: rule.whyItMatters,
-        suggestedFix: rule.suggestedFix,
-        source: rule.source,
-        language: file.language
-      });
+      while ((match = matcher.exec(file.content)) !== null) {
+        const line = lineNumberFor(file.content, match.index);
+        if (seenLines.has(line)) {
+          continue;
+        }
+
+        seenLines.add(line);
+        findings.push({
+          id: createId(rule.id),
+          title: rule.title,
+          severity: rule.severity,
+          confidence: rule.confidence,
+          category: rule.category,
+          cwe: rule.cwe,
+          owasp: rule.owasp,
+          file: file.path,
+          line,
+          evidence: evidenceSnippet(file.content, match.index, match[0].length),
+          whyItMatters: rule.whyItMatters,
+          suggestedFix: rule.suggestedFix,
+          source: rule.source,
+          language: file.language
+        });
+
+        if (match.index === matcher.lastIndex) {
+          matcher.lastIndex += 1;
+        }
+      }
     }
   }
 
