@@ -1,8 +1,6 @@
-import { AnalysisResult, RepoSnapshot, ScanRequestInput } from "@/lib/types";
-import { enrichFindingWithLlm } from "@/lib/llm";
-import { scanDependencies } from "@/lib/scanner/dependencies";
-import { scanRuleMatches } from "@/lib/scanner/rules";
-import { scanSecrets } from "@/lib/scanner/secrets";
+import { AnalysisResult, Finding, RepoSnapshot, ScanRequestInput } from "@/lib/types";
+import { analyzeRepositoryWithLlm } from "@/lib/llm";
+import { getServerLlmConfig } from "@/lib/llm-config";
 
 export async function analyzeRepository(
   snapshot: RepoSnapshot,
@@ -12,29 +10,22 @@ export async function analyzeRepository(
     "Passive analysis only. No active exploit attempts or deployed URL probing were performed.",
     `Scan coverage included ${snapshot.stats.totalFiles} text files and ${snapshot.stats.totalBytes.toLocaleString()} bytes.`
   ];
+  const llmConfig = getServerLlmConfig();
+  let findings: Finding[] = [];
 
-  const findings = [
-    ...scanRuleMatches(snapshot.files),
-    ...scanDependencies(snapshot.files),
-    ...scanSecrets(snapshot.files)
-  ];
-
-  if (input.llm?.apiKey) {
-    notes.push("LLM enrichment enabled for top findings using user-supplied credentials.");
-    const topFindings = findings
-      .sort((left, right) => severityScore(right.severity) - severityScore(left.severity))
-      .slice(0, 5);
-
-    for (const candidate of topFindings) {
-      const enriched = await enrichFindingWithLlm(candidate, snapshot, input.llm);
-      if (!enriched) continue;
-      const index = findings.findIndex((finding) => finding.id === candidate.id);
-      if (index >= 0) {
-        findings[index] = enriched;
+  if (llmConfig) {
+    notes.push(`LLM-first analysis enabled using the configured ${llmConfig.model} model.`);
+    try {
+      findings = await analyzeRepositoryWithLlm(snapshot, llmConfig);
+      if (!findings.length) {
+        notes.push("The model did not return any concrete vulnerabilities for the reviewed repository chunks.");
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown LLM error.";
+      notes.push(`LLM analysis failed: ${message}`);
     }
   } else {
-    notes.push("LLM enrichment skipped. Remediation text came from curated rule guidance.");
+    notes.push("LLM analysis skipped because no server-side LLM secrets are configured.");
   }
 
   if (!snapshot.languages.length) {
@@ -47,19 +38,4 @@ export async function analyzeRepository(
     languages: snapshot.languages,
     notes
   };
-}
-
-function severityScore(severity: string) {
-  switch (severity) {
-    case "critical":
-      return 4;
-    case "high":
-      return 3;
-    case "medium":
-      return 2;
-    case "low":
-      return 1;
-    default:
-      return 0;
-  }
 }

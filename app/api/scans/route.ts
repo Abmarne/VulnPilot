@@ -5,15 +5,7 @@ import { createScan, listScans } from "@/lib/store";
 
 const scanInputSchema = z.object({
   repoUrl: z.string().url().max(200),
-  branch: z.string().max(80).optional(),
-  llm: z
-    .object({
-      provider: z.string().default("openai-compatible"),
-      model: z.string().default("gpt-4.1-mini"),
-      apiKey: z.string().optional(),
-      baseUrl: z.string().url().optional()
-    })
-    .optional()
+  branch: z.string().max(80).optional()
 });
 
 export async function GET() {

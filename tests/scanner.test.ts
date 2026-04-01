@@ -17,34 +17,8 @@ const sampleRepo: RepoSnapshot = {
       language: "typescript",
       content: `
         import { exec } from "child_process";
-        import { createHash } from "crypto";
-        const userUrl = req.query.url;
-        fetch(req.query.url);
-        div.innerHTML = req.body.content;
         exec(req.body.command);
         res.redirect(req.query.next);
-        fs.readFile(req.query.path);
-        const digest = createHash("md5").update(password).digest("hex");
-      `
-    },
-    {
-      path: "src/legacy.ts",
-      language: "typescript",
-      content: `
-        div.innerHTML = profile.bio;
-        section.innerHTML = settings.signature;
-      `
-    },
-    {
-      path: "package.json",
-      language: "javascript",
-      content: `
-        {
-          "dependencies": {
-            "lodash": "4.17.15",
-            "axios": "0.27.2"
-          }
-        }
       `
     },
     {
@@ -56,32 +30,85 @@ const sampleRepo: RepoSnapshot = {
   languages: ["typescript"],
   frameworks: ["express"],
   stats: {
-    totalFiles: 4,
-    totalBytes: 600
+    totalFiles: 2,
+    totalBytes: 160
   }
 };
 
-test("analyzeRepository finds multiple passive security issues", async () => {
-  const result = await analyzeRepository(sampleRepo, {
-    repoUrl: sampleRepo.repo.url
-  });
+test("analyzeRepository returns normalized findings from the shared LLM", async () => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.SCANNER_LLM_API_KEY;
+  const originalBaseUrl = process.env.SCANNER_LLM_BASE_URL;
+  const originalModel = process.env.SCANNER_LLM_MODEL;
 
-  assert.ok(result.findings.some((finding) => finding.category === "xss"));
-  assert.ok(result.findings.some((finding) => finding.category === "command_injection"));
-  assert.ok(result.findings.some((finding) => finding.category === "ssrf"));
-  assert.ok(result.findings.some((finding) => finding.category === "path_traversal"));
-  assert.ok(result.findings.some((finding) => finding.category === "weak_crypto"));
-  assert.ok(result.findings.some((finding) => finding.category === "open_redirect"));
-  assert.ok(result.findings.some((finding) => finding.category === "vulnerable_dependency"));
-  assert.ok(result.findings.some((finding) => finding.category === "secrets"));
+  process.env.SCANNER_LLM_API_KEY = "test-key";
+  process.env.SCANNER_LLM_BASE_URL = "https://example.test/v1";
+  process.env.SCANNER_LLM_MODEL = "gemini-test";
+
+  global.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                findings: [
+                  {
+                    title: "Command execution with user input",
+                    severity: "critical",
+                    confidence: "likely",
+                    category: "command_injection",
+                    cwe: "CWE-78",
+                    owasp: "A03:2021 Injection",
+                    file: "src/server.ts",
+                    line: 3,
+                    evidence: "exec(req.body.command);",
+                    whyItMatters: "Untrusted input reaching shell execution can become remote code execution.",
+                    suggestedFix: "Avoid shell execution or strictly allowlist arguments.",
+                    language: "typescript"
+                  }
+                ]
+              })
+            }
+          }
+        ]
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    )) as typeof fetch;
+
+  try {
+    const result = await analyzeRepository(sampleRepo, {
+      repoUrl: sampleRepo.repo.url
+    });
+
+    assert.equal(result.findings.length, 1);
+    assert.equal(result.findings[0]?.source, "llm");
+    assert.equal(result.findings[0]?.category, "command_injection");
+    assert.match(result.notes.join(" "), /LLM-first analysis enabled/i);
+  } finally {
+    global.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.SCANNER_LLM_API_KEY;
+    else process.env.SCANNER_LLM_API_KEY = originalApiKey;
+    if (originalBaseUrl === undefined) delete process.env.SCANNER_LLM_BASE_URL;
+    else process.env.SCANNER_LLM_BASE_URL = originalBaseUrl;
+    if (originalModel === undefined) delete process.env.SCANNER_LLM_MODEL;
+    else process.env.SCANNER_LLM_MODEL = originalModel;
+  }
 });
 
-test("analyzeRepository reports multiple matches for the same rule in one file", async () => {
-  const result = await analyzeRepository(sampleRepo, {
-    repoUrl: sampleRepo.repo.url
-  });
+test("analyzeRepository reports skipped analysis when no shared LLM is configured", async () => {
+  const originalApiKey = process.env.SCANNER_LLM_API_KEY;
+  delete process.env.SCANNER_LLM_API_KEY;
 
-  const xssFindings = result.findings.filter((finding) => finding.category === "xss");
-  assert.ok(xssFindings.length >= 2);
-  assert.ok(xssFindings.some((finding) => finding.file === "src/legacy.ts"));
+  try {
+    const result = await analyzeRepository(sampleRepo, {
+      repoUrl: sampleRepo.repo.url
+    });
+
+    assert.equal(result.findings.length, 0);
+    assert.match(result.notes.join(" "), /LLM analysis skipped/i);
+  } finally {
+    if (originalApiKey === undefined) delete process.env.SCANNER_LLM_API_KEY;
+    else process.env.SCANNER_LLM_API_KEY = originalApiKey;
+  }
 });

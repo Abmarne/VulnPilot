@@ -1,13 +1,13 @@
 # VulnPilot
 
-VulnPilot is a Next.js web app for passive, AI-assisted secure code review of public GitHub repositories. It is designed for free-tier hosting and defaults to deterministic scanning so the product remains useful even without an LLM provider.
+VulnPilot is a Next.js web app for passive, AI-assisted secure code review of public GitHub repositories. It is designed for free-tier hosting and uses one shared server-side model to perform LLM-first vulnerability review.
 
 ## What it does
 
 - Accepts a public GitHub repository URL and optional branch override
 - Queues a passive scan job and normalizes findings into a professional report
-- Detects common risky patterns such as command execution sinks, SQL concatenation, debug mode, secret leakage, and a small set of dependency issues
-- Optionally enriches the top findings with an OpenAI-compatible LLM using a user-supplied API key
+- Reviews repository code with one shared server-configured OpenAI-compatible LLM
+- Exports structured findings as JSON or Markdown
 - Exports reports as JSON or Markdown
 
 ## Stack
@@ -16,7 +16,7 @@ VulnPilot is a Next.js web app for passive, AI-assisted secure code review of pu
 - TypeScript
 - In-memory persistence for local development
 - GitHub archive ingestion with JSZip
-- Rule-based analysis with curated remediation guidance
+- LLM-first analysis with normalized remediation guidance
 
 ## Run locally
 
@@ -26,6 +26,21 @@ npm run dev
 ```
 
 Open `http://localhost:3000`.
+
+To enable one shared backend model, set these environment variables in your deployment secrets or local `.env.local`:
+
+```bash
+SCANNER_LLM_PROVIDER=openai-compatible
+SCANNER_LLM_MODEL=gpt-4.1-mini
+SCANNER_LLM_BASE_URL=https://api.openai.com/v1
+SCANNER_LLM_API_KEY=your-secret-key
+```
+
+Examples:
+
+- OpenRouter: `SCANNER_LLM_BASE_URL=https://openrouter.ai/api/v1`
+- Gemini OpenAI-compatible endpoint: `SCANNER_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai`
+- Hugging Face router: `SCANNER_LLM_BASE_URL=https://router.huggingface.co/v1`
 
 ## API
 
@@ -40,13 +55,7 @@ Example request:
 ```json
 {
   "repoUrl": "https://github.com/vercel/next.js",
-  "branch": "canary",
-  "llm": {
-    "provider": "openai-compatible",
-    "model": "gpt-4.1-mini",
-    "baseUrl": "https://api.openai.com/v1",
-    "apiKey": "sk-..."
-  }
+  "branch": "canary"
 }
 ```
 
@@ -54,4 +63,5 @@ Example request:
 
 - v1 is intentionally passive and only supports public GitHub repositories.
 - The current persistence layer is in-memory to keep the starter simple. Swap `lib/store.ts` for Supabase or another durable store before production deployment.
-- The rule engine is intentionally lightweight. For deeper coverage, integrate Semgrep, dependency advisories, or background workers in a follow-up iteration.
+- The current LLM integration does not "train" the model. To improve results over time, keep refining prompts, add examples, and store reviewer feedback for future tuning workflows.
+- For stronger production-grade coverage, pair the LLM reviewer with Semgrep, dependency advisories, or background workers in a follow-up iteration.

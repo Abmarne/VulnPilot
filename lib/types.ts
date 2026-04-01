@@ -2,17 +2,11 @@ export type ScanStatus = "queued" | "analyzing" | "report_ready" | "failed";
 
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 export type Confidence = "confirmed" | "likely" | "needs_review";
-export type FindingSource = "custom_rules" | "dependency_audit" | "secret_scan" | "llm";
+export type FindingSource = "llm";
 
 export interface ScanRequestInput {
   repoUrl: string;
   branch?: string;
-  llm?: {
-    provider: string;
-    model: string;
-    apiKey?: string;
-    baseUrl?: string;
-  };
 }
 
 export interface RepoFile {

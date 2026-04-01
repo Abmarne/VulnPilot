@@ -17,14 +17,9 @@ const severityOrder: Severity[] = ["critical", "high", "medium", "low", "info"];
 export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
   const [repoUrl, setRepoUrl] = useState("");
   const [branch, setBranch] = useState("");
-  const [provider, setProvider] = useState("openai-compatible");
-  const [model, setModel] = useState("gpt-4.1-mini");
-  const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
-  const [apiKey, setApiKey] = useState("");
   const [scans, setScans] = useState<ScanRecord[]>(initialScans);
   const [activeScanId, setActiveScanId] = useState<string | null>(initialScans[0]?.id ?? null);
   const [severityFilter, setSeverityFilter] = useState("all");
-  const [sourceFilter, setSourceFilter] = useState("all");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -37,6 +32,14 @@ export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
 
     const interval = window.setInterval(async () => {
       const response = await fetch(`/api/scans/${activeScan.id}`, { cache: "no-store" });
+      if (response.status === 404) {
+        setStatusMessage("The scan record was lost after a server reload. Please start the scan again.");
+        setScans((current) => current.filter((entry) => entry.id !== activeScan.id));
+        setActiveScanId((current) => (current === activeScan.id ? null : current));
+        window.clearInterval(interval);
+        return;
+      }
+
       if (!response.ok) return;
 
       const { scan } = (await response.json()) as { scan: ScanRecord };
@@ -55,13 +58,9 @@ export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
   const filteredFindings = useMemo(() => {
     const findings = activeScan?.findings ?? [];
     return findings
-      .filter((finding) => {
-        const severityMatches = severityFilter === "all" || finding.severity === severityFilter;
-        const sourceMatches = sourceFilter === "all" || finding.source === sourceFilter;
-        return severityMatches && sourceMatches;
-      })
+      .filter((finding) => severityFilter === "all" || finding.severity === severityFilter)
       .sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
-  }, [activeScan, severityFilter, sourceFilter]);
+  }, [activeScan, severityFilter]);
 
   async function submitScan(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -74,15 +73,7 @@ export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           repoUrl,
-          branch: branch || undefined,
-          llm: apiKey
-            ? {
-                provider,
-                model,
-                baseUrl,
-                apiKey
-              }
-            : undefined
+          branch: branch || undefined
         })
       });
 
@@ -123,8 +114,8 @@ export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
         </div>
 
         <div className="topbarMeta">
-          <span className="metaPill">Rules-first scanning</span>
-          <span className="metaPill">Optional BYO model</span>
+          <span className="metaPill">LLM-first scanning</span>
+          <span className="metaPill">Shared server model</span>
         </div>
       </header>
 
@@ -158,39 +149,6 @@ export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
               />
             </div>
 
-            <details className="disclosure">
-              <summary>Advanced settings</summary>
-              <div className="advancedFields">
-                <div className="field">
-                  <label htmlFor="provider">Provider</label>
-                  <select id="provider" value={provider} onChange={(event) => setProvider(event.target.value)}>
-                    <option value="openai-compatible">OpenAI-compatible</option>
-                  </select>
-                </div>
-
-                <div className="field">
-                  <label htmlFor="model">Model</label>
-                  <input id="model" value={model} onChange={(event) => setModel(event.target.value)} />
-                </div>
-
-                <div className="field">
-                  <label htmlFor="base-url">Base URL</label>
-                  <input id="base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
-                </div>
-
-                <div className="field">
-                  <label htmlFor="api-key">API key</label>
-                  <input
-                    id="api-key"
-                    type="password"
-                    placeholder="Leave blank for rules-only analysis"
-                    value={apiKey}
-                    onChange={(event) => setApiKey(event.target.value)}
-                  />
-                </div>
-              </div>
-            </details>
-
             <div className="buttonRow">
               <button className="button buttonPrimary" disabled={isSubmitting} type="submit">
                 {isSubmitting ? "Queueing..." : "Start scan"}
@@ -213,6 +171,11 @@ export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
           <div className="ruleBox">
             <strong>Usage note</strong>
             <p>Only scan repositories you own or are authorized to review. This app does not probe live targets.</p>
+          </div>
+
+          <div className="ruleBox">
+            <strong>LLM mode</strong>
+            <p>The scanner uses one server-configured model for repository analysis. End users do not supply model settings or API keys.</p>
           </div>
 
           <div className="sectionTitle">
@@ -310,14 +273,6 @@ export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
                   <option value="medium">Medium</option>
                   <option value="low">Low</option>
                   <option value="info">Info</option>
-                </select>
-
-                <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}>
-                  <option value="all">All sources</option>
-                  <option value="custom_rules">Static rules</option>
-                  <option value="dependency_audit">Dependency checks</option>
-                  <option value="secret_scan">Secret scan</option>
-                  <option value="llm">LLM refined</option>
                 </select>
               </div>
 
@@ -441,16 +396,7 @@ function formatConfidence(confidence: Finding["confidence"]) {
 }
 
 function formatSource(source: Finding["source"]) {
-  switch (source) {
-    case "custom_rules":
-      return "Static rule";
-    case "dependency_audit":
-      return "Dependency check";
-    case "secret_scan":
-      return "Secret scan";
-    default:
-      return "LLM refined";
-  }
+  return source === "llm" ? "LLM analysis" : source;
 }
 
 function getStatusLabel(status: ScanRecord["status"]) {
@@ -468,7 +414,7 @@ function getStatusLabel(status: ScanRecord["status"]) {
 
 function buildExecutiveSummary(summary: typeof emptySummary) {
   if (summary.total === 0) {
-    return "No findings are shown yet. If the scan has finished, the repository may be clean or outside the strongest rule coverage.";
+    return "No findings are shown yet. If the scan has finished, the repository may be clean or the model may not have found a concrete vulnerability in the reviewed code.";
   }
 
   const parts = [];

@@ -1,7 +1,16 @@
 import { ScanRecord, ScanRequestInput, ScanStatus } from "@/lib/types";
 import { createId } from "@/lib/utils";
 
-const scans = new Map<string, ScanRecord>();
+declare global {
+  // Preserve in-memory scans across Next.js dev reloads in the same process.
+  var __vulnPilotScans__: Map<string, ScanRecord> | undefined;
+}
+
+const scans = globalThis.__vulnPilotScans__ ?? new Map<string, ScanRecord>();
+
+if (!globalThis.__vulnPilotScans__) {
+  globalThis.__vulnPilotScans__ = scans;
+}
 
 function now() {
   return new Date().toISOString();
