@@ -24,6 +24,7 @@ export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const activeScan = scans.find((scan) => scan.id === activeScanId) ?? scans[0] ?? null;
+  const summary = activeScan?.summary ?? emptySummary;
 
   useEffect(() => {
     if (!activeScan || !["queued", "analyzing"].includes(activeScan.status)) {
@@ -97,122 +98,137 @@ export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
     window.open(`/api/scans/${activeScan.id}/export?format=${format}`, "_blank", "noopener,noreferrer");
   }
 
-  const summary = activeScan?.summary ?? emptySummary;
-
   return (
     <main className="shell">
-      <header className="topbar">
-        <div className="brandLockup">
-          <div className="brandIcon" aria-hidden="true">
-            <span />
-            <span />
+      <header className="hero panel">
+        <div className="heroMain">
+          <div className="brandLockup">
+            <div className="brandLogo" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+                <circle cx="12" cy="11" r="3" />
+                <path d="M12 8v2" />
+                <path d="M12 12v2" />
+                <path d="M9 11h2" />
+                <path d="M13 11h2" />
+              </svg>
+            </div>
+            <div className="brandText">
+              <strong className="brandTitle">VulnPilot</strong>
+            </div>
           </div>
-          <div>
-            <strong>VulnPilot</strong>
-            <p>Passive code vulnerability review for public GitHub repositories</p>
-          </div>
+
+          <h1 className="heroTitle">Professional repository scanning with one shared model and a cleaner review workflow.</h1>
+          <p className="heroCopy">
+            Submit a public GitHub repository, let the backend model inspect the code, then review prioritized findings,
+            evidence, and remediation guidance in a structured report.
+          </p>
         </div>
 
-        <div className="topbarMeta">
-          <span className="metaPill">LLM-first scanning</span>
-          <span className="metaPill">Shared server model</span>
+        <div className="heroMeta">
+          <MetaCard label="Mode" value="Passive only" />
+          <MetaCard label="Analysis" value="LLM powered" />
+          <MetaCard label="Reports" value="JSON and Markdown" />
         </div>
       </header>
 
       <section className="appGrid">
-        <aside className="sidebar panel">
-          <div className="sectionIntro">
-            <h1>New scan</h1>
-            <p>Paste a public repository URL and review the resulting report on the right.</p>
-          </div>
-
-          <form className="form" onSubmit={submitScan}>
-            <div className="field">
-              <label htmlFor="repo-url">Repository URL</label>
-              <input
-                id="repo-url"
-                type="url"
-                required
-                placeholder="https://github.com/owner/repo"
-                value={repoUrl}
-                onChange={(event) => setRepoUrl(event.target.value)}
-              />
+        <aside className="sidebarStack">
+          <section className="panel sidebar">
+            <div className="sectionIntro">
+              <span className="sectionKicker">Launch Scan</span>
+              <h2>Inspect a repository</h2>
+              <p>Paste a public GitHub repository URL and optionally choose a branch to start a passive review.</p>
             </div>
 
-            <div className="field">
-              <label htmlFor="branch">Branch</label>
-              <input
-                id="branch"
-                placeholder="Optional branch override"
-                value={branch}
-                onChange={(event) => setBranch(event.target.value)}
-              />
-            </div>
+            <form className="form" onSubmit={submitScan}>
+              <div className="field">
+                <label htmlFor="repo-url">Repository URL</label>
+                <input
+                  id="repo-url"
+                  type="url"
+                  required
+                  placeholder="https://github.com/owner/repo"
+                  value={repoUrl}
+                  onChange={(event) => setRepoUrl(event.target.value)}
+                />
+              </div>
 
-            <div className="buttonRow">
-              <button className="button buttonPrimary" disabled={isSubmitting} type="submit">
-                {isSubmitting ? "Queueing..." : "Start scan"}
-              </button>
-              <button
-                className="button buttonSecondary"
-                type="button"
-                onClick={() => {
-                  setRepoUrl("https://github.com/octocat/Hello-World");
-                  setBranch("master");
-                }}
-              >
-                Use example
-              </button>
-            </div>
-          </form>
+              <div className="field">
+                <label htmlFor="branch">Branch</label>
+                <input
+                  id="branch"
+                  placeholder="Optional branch override"
+                  value={branch}
+                  onChange={(event) => setBranch(event.target.value)}
+                />
+              </div>
 
-          {statusMessage ? <div className="notice">{statusMessage}</div> : null}
-
-          <div className="ruleBox">
-            <strong>Usage note</strong>
-            <p>Only scan repositories you own or are authorized to review. This app does not probe live targets.</p>
-          </div>
-
-          <div className="ruleBox">
-            <strong>LLM mode</strong>
-            <p>The scanner uses one server-configured model for repository analysis. End users do not supply model settings or API keys.</p>
-          </div>
-
-          <div className="sectionTitle">
-            <h2>Recent scans</h2>
-          </div>
-
-          <div className="scanList">
-            {scans.length ? (
-              scans.slice(0, 8).map((scan) => (
-                <button
-                  className={`scanRow ${scan.id === activeScan?.id ? "scanRowActive" : ""}`}
-                  key={scan.id}
-                  type="button"
-                  onClick={() => setActiveScanId(scan.id)}
-                >
-                  <span className="scanRowTitle">{scan.repoName ?? scan.repoUrl}</span>
-                  <span className="scanRowMeta">
-                    <span>{getStatusLabel(scan.status)}</span>
-                    <span>{scan.summary.total} findings</span>
-                  </span>
+              <div className="buttonRow">
+                <button className="button buttonPrimary" disabled={isSubmitting} type="submit">
+                  {isSubmitting ? "Queueing..." : "Start scan"}
                 </button>
-              ))
-            ) : (
-              <div className="emptyBlock">No scans yet.</div>
-            )}
-          </div>
+                <button
+                  className="button buttonSecondary"
+                  type="button"
+                  onClick={() => {
+                    setRepoUrl("https://github.com/octocat/Hello-World");
+                    setBranch("master");
+                  }}
+                >
+                  Use example
+                </button>
+              </div>
+            </form>
+
+            {statusMessage ? <div className="notice">{statusMessage}</div> : null}
+
+            <div className="infoGrid">
+              <div className="infoCard">
+                <strong>Usage note</strong>
+                <p>Only scan repositories you own or are authorized to review. This app does not probe live targets.</p>
+              </div>
+              <div className="infoCard">
+                <strong>Model setup</strong>
+                <p>The scanner uses one server-configured model. End users never enter API keys or model settings.</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel sidebar recentPanel">
+            <div className="sectionTitle">
+              <span className="sectionKicker">History</span>
+              <h2>Recent scans</h2>
+            </div>
+
+            <div className="scanList">
+              {scans.length ? (
+                scans.slice(0, 8).map((scan) => (
+                  <button
+                    className={`scanRow ${scan.id === activeScan?.id ? "scanRowActive" : ""}`}
+                    key={scan.id}
+                    type="button"
+                    onClick={() => setActiveScanId(scan.id)}
+                  >
+                    <span className="scanRowTitle">{scan.repoName ?? scan.repoUrl}</span>
+                    <span className="scanRowMeta">
+                      <span>{getStatusLabel(scan.status)}</span>
+                      <span>{scan.summary.total} findings</span>
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="emptyBlock">No scans yet.</div>
+              )}
+            </div>
+          </section>
         </aside>
 
-        <section className="report panel">
+        <section className="panel report">
           <div className="reportHead">
-            <div>
-              <div className="sectionTitle">
-                <h2>Report</h2>
-              </div>
-              <h3 className="reportTitle">
-                {activeScan?.repoName ?? "No report selected"}
-              </h3>
+            <div className="reportIntro">
+              <span className="sectionKicker">Assessment</span>
+              <h2 className="reportTitle">{activeScan?.repoName ?? "No report selected"}</h2>
               <p className="reportSubtitle">
                 {activeScan
                   ? activeScan.repo
@@ -237,7 +253,10 @@ export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
               <div className="statusBar">
                 <div className="statusGroup">
                   <span className={`statusDot status-${activeScan.status}`} />
-                  <strong>{getStatusLabel(activeScan.status)}</strong>
+                  <div>
+                    <span className="statusLabel">Scan status</span>
+                    <strong>{getStatusLabel(activeScan.status)}</strong>
+                  </div>
                 </div>
 
                 <div className="statusTags">
@@ -261,19 +280,20 @@ export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
                 <SummaryCard label="Medium" value={summary.medium} tone="medium" />
               </div>
 
-              <div className="summaryNote">
-                {buildExecutiveSummary(summary)}
-              </div>
+              <div className="summaryNote">{buildExecutiveSummary(summary)}</div>
 
               <div className="filters">
-                <select value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value)}>
-                  <option value="all">All severities</option>
-                  <option value="critical">Critical</option>
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                  <option value="info">Info</option>
-                </select>
+                <div className="field filterField">
+                  <label htmlFor="severity-filter">Severity</label>
+                  <select id="severity-filter" value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value)}>
+                    <option value="all">All severities</option>
+                    <option value="critical">Critical</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                    <option value="info">Info</option>
+                  </select>
+                </div>
               </div>
 
               {activeScan.error ? <div className="notice noticeError">{activeScan.error}</div> : null}
@@ -285,12 +305,12 @@ export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
               </div>
 
               {!filteredFindings.length && activeScan.status === "report_ready" ? (
-                <div className="emptyBlock">No findings matched the current filters.</div>
+                <div className="emptyBlock">No findings matched the current filter.</div>
               ) : null}
 
               {activeScan.notes.length ? (
                 <section className="notesPanel">
-                  <h4>Scan notes</h4>
+                  <h3>Scan notes</h3>
                   <ul className="notesList">
                     {activeScan.notes.map((note) => (
                       <li key={note}>{note}</li>
@@ -301,13 +321,23 @@ export function Dashboard({ initialScans }: { initialScans: ScanRecord[] }) {
             </>
           ) : (
             <div className="emptyState">
+              <span className="sectionKicker">Waiting</span>
               <h3>No report selected</h3>
-              <p>Run a scan from the left side to generate a structured report.</p>
+              <p>Start a scan from the left side to generate an aligned, exportable security review.</p>
             </div>
           )}
         </section>
       </section>
     </main>
+  );
+}
+
+function MetaCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="metaCard">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
@@ -332,13 +362,13 @@ function FindingCard({ finding }: { finding: Finding }) {
   return (
     <article className={`findingCard severityBorder-${finding.severity}`}>
       <div className="findingHeader">
-        <div>
+        <div className="findingLead">
           <div className="findingMeta">
             <span className={`severityPill severity-${finding.severity}`}>{formatSeverity(finding.severity)}</span>
             <span className="tag tagMuted">{formatConfidence(finding.confidence)}</span>
             <span className="tag tagMuted">{formatSource(finding.source)}</span>
           </div>
-          <h4>{finding.title}</h4>
+          <h3>{finding.title}</h3>
         </div>
 
         <div className="findingPath">
@@ -348,12 +378,12 @@ function FindingCard({ finding }: { finding: Finding }) {
       </div>
 
       <div className="findingContent">
-        <section>
+        <section className="contentCard">
           <span className="label">Why this matters</span>
           <p>{finding.whyItMatters}</p>
         </section>
 
-        <section>
+        <section className="contentCard">
           <span className="label">Recommended fix</span>
           <p>{finding.suggestedFix}</p>
         </section>
