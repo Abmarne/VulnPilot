@@ -181,7 +181,8 @@ def analyze_anomalies(anomalies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
           "vulnerability_type": "e.g. SQL Injection",
           "severity": "Low|Medium|High|Critical",
           "explanation": "2-sentence explanation of the risk.",
-          "manual_poc": "Step-by-step safe verification steps."
+          "manual_poc": "Step-by-step manual verification steps.",
+          "poc_script": "A copy-pasteable Python or Curl script to reproduce the vulnerability (safely)."
         }}
         """
         try:
@@ -242,7 +243,8 @@ def _analyze_file_batch(file_blocks: List[str], anomalies: List[Dict[str, Any]])
         "severity": "Info|Low|Medium|High|Critical",
         "url": "exact relative filename from the FILE PATH header above each code block",
         "explanation": "2-sentence explanation of the risk.",
-        "manual_poc": "Step-by-step safe verification and exact remediation snippet."
+        "manual_poc": "Step-by-step manual verification and exact remediation snippet.",
+        "poc_script": "A copy-pasteable Python or Curl script to reproduce the vulnerability (safely)."
       }}
     ]
     """
@@ -307,7 +309,8 @@ def analyze_hybrid(anomalies: List[Dict[str, Any]], code_context: str) -> List[D
             "severity": "Info",
             "url": "All Scanned Files",
             "explanation": "Gemini found no security issues in the codebase or DAST surface.",
-            "manual_poc": "The scanned code appears clean. Try a different codebase with known vulnerabilities like OWASP Juice Shop."
+            "manual_poc": "The scanned code appears clean. Try a different codebase with known vulnerabilities like OWASP Juice Shop.",
+            "poc_script": "# No vulnerability found to reproduce."
         })
 
     return all_findings

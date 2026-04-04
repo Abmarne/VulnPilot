@@ -111,7 +111,20 @@ export default function Home() {
                     No vulnerabilities discovered across surface and codebase.
                 </div>
             ) : (
-                scanResult.findings.map((finding: any, idx: number) => {
+                [...scanResult.findings]
+                  .sort((a, b) => {
+                    const order: Record<string, number> = {
+                      critical: 5,
+                      high: 4,
+                      medium: 3,
+                      low: 2,
+                      info: 1,
+                    };
+                    const sevA = (a.severity || "info").toLowerCase();
+                    const sevB = (b.severity || "info").toLowerCase();
+                    return (order[sevB] || 0) - (order[sevA] || 0);
+                  })
+                  .map((finding: any, idx: number) => {
                     const sev = (finding.severity || "Unknown").toLowerCase();
                     const sevColor = sev === "critical" ? "text-purple-400 bg-purple-900/30 border-purple-800" 
                                    : sev === "high" ? "text-red-400 bg-red-900/30 border-red-800"
@@ -134,12 +147,33 @@ export default function Home() {
                                 <p className="text-neutral-300 text-sm leading-relaxed">{finding.explanation}</p>
                             </div>
                             
-                            <div className="bg-neutral-950 p-5 rounded-lg border border-neutral-800 shadow-inner">
+                            <div className="bg-neutral-950 p-5 rounded-lg border border-neutral-800 shadow-inner mb-4">
                                 <span className="text-xs uppercase text-emerald-500 font-bold tracking-wider mb-2 flex items-center">
-                                    Manual Verification PoC & Remediation
+                                    Manual Verification steps & Remediation
                                 </span>
                                 <p className="text-sm font-mono text-neutral-300 whitespace-pre-wrap leading-relaxed">{finding.manual_poc}</p>
                             </div>
+
+                            {finding.poc_script && (
+                                <div className="bg-neutral-950 p-5 rounded-lg border border-neutral-800 shadow-inner">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-xs uppercase text-teal-400 font-bold tracking-wider flex items-center gap-2">
+                                            <span className="animate-pulse">🚀</span> Exploit / PoC Script
+                                        </span>
+                                        <button 
+                                            onClick={() => navigator.clipboard.writeText(finding.poc_script)}
+                                            className="text-[10px] text-neutral-500 hover:text-teal-400 transition-all uppercase font-bold tracking-widest bg-neutral-900 px-3 py-1.5 rounded-md border border-neutral-800 hover:border-teal-900/50 shadow-lg"
+                                        >
+                                            Copy Script
+                                        </button>
+                                    </div>
+                                    <div className="relative group">
+                                        <pre className="text-sm font-mono text-neutral-300 overflow-x-auto p-3 bg-neutral-900/50 rounded border border-emerald-900/10 scrollbar-thin scrollbar-thumb-neutral-800">
+                                            <code>{finding.poc_script}</code>
+                                        </pre>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     );
                 })
