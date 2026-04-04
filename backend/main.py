@@ -19,8 +19,7 @@ app.add_middleware(
 )
 
 class ScanRequest(BaseModel):
-    target_url: str
-    codebase_path: Optional[str] = None
+    target: str
     session_cookie: Optional[str] = None
     crawl_depth: Optional[int] = 2
 
@@ -32,41 +31,69 @@ class ScanResponse(BaseModel):
 
 @app.post("/api/scan/start", response_model=ScanResponse)
 async def start_scan(request: ScanRequest):
-    if not request.target_url.startswith("http"):
-        raise HTTPException(status_code=400, detail="Target URL must start with http:// or https://")
+    input_targets = [t.strip() for t in request.target.split(",") if t.strip()]
+    target_url = None
+    codebase_path = None
     
-    print(f"\n--- [ SCAN INITIATED ] ---")
-    print(f"Target: {request.target_url}")
-    
-    # 1. Recon (Crawling)
-    crawler = ReconCrawler(request.target_url, request.session_cookie)
-    endpoints = crawler.map_surface()
-    
-    if not endpoints:
-        return {"status": "error", "message": "Crawler could not find any valid endpoints.", "job_id": "job_0", "findings": []}
+    for t in input_targets:
+        is_github = "github.com" in t.lower()
+        is_http = t.lower().startswith(("http://", "https://"))
         
-    # 2. Fuzzing
-    fuzzer = Fuzzer(endpoints, request.session_cookie)
-    raw_anomalies = fuzzer.run_fuzzer()
+        if is_github:
+            if not is_http:
+                t = "https://" + t
+            codebase_path = t
+            print(f"[*] Detected GitHub repository as target: {codebase_path}")
+        elif is_http:
+            target_url = t
+            print(f"[*] Detected Web Application as target: {target_url}")
+        elif "." in t and "/" not in t and "\\" not in t:
+            # Probable domain name like "example.com"
+            target_url = "http://" + t
+            print(f"[*] Detected Domain as target: {target_url}")
+        else:
+            # Assume local path
+            codebase_path = t
+            print(f"[*] Detected Local Codebase as target: {codebase_path}")
+
+    print(f"\n--- [ SCAN INITIATED ] ---")
     
+    # 1 & 2. Recon and Fuzzing (DAST)
+    raw_anomalies = []
+    endpoints_count = 0
+    if target_url:
+        print(f"[*] Starting Black/Grey Box Discovery on {target_url}...")
+        crawler = ReconCrawler(target_url, request.session_cookie)
+        endpoints = crawler.map_surface()
+        endpoints_count = len(endpoints)
+        
+        if endpoints:
+            fuzzer = Fuzzer(endpoints, request.session_cookie)
+            raw_anomalies = fuzzer.run_fuzzer(target_url)
+        else:
+            print("[!] Crawler could not find any valid endpoints for DAST.")
+            
     # 3. Codebase Extraction (SAST)
     code_context = ""
-    if request.codebase_path:
+    if codebase_path:
         print(f"\n--- [ EXTRACTING SOURCE CODE ] ---")
-        sast = SastEngine(request.codebase_path)
+        sast = SastEngine(codebase_path)
         sast.prepare_codebase()
         code_context = sast.extract_critical_files()
         sast.cleanup()
     
-    # 4. LLM Analysis (Hybrid or Pure DAST)
+    if not target_url and not code_context:
+        return {"status": "error", "message": "No valid targets found (web URL or valid codebase).", "job_id": "job_0", "findings": []}
+
+    # 4. LLM Analysis (Hybrid, DAST-only, or SAST-only)
     analyzed_findings = llm.analyze_hybrid(raw_anomalies, code_context)
 
     print(f"--- [ SCAN COMPLETE ] ---")
-    print(f"Total Confirmed Findings: {len(analyzed_findings)}\n")
+    print(f"Total Findings: {len(analyzed_findings)}\n")
 
     return {
         "status": "success",
-        "message": f"Scan completed across {len(endpoints)} endpoints. Found {len(analyzed_findings)} potential issues.",
+        "message": f"Scan completed. Analyzed {endpoints_count} endpoints and codebase context. Found {len(analyzed_findings)} potential issues.",
         "job_id": "job_12345",
         "findings": analyzed_findings
     }

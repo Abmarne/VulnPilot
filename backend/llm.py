@@ -1,67 +1,111 @@
-from google import genai as google_genai
+from google import genai
 from groq import Groq
 import os
 import json
 import time
 from typing import List, Dict, Any
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # ── Provider Selection ──────────────────────────────────────────────────────
-# Set GROQ_API_KEY env var (or paste below) to use Groq (recommended: 14k req/day free)
-# Set GOOGLE_API_KEY env var to fall back to Gemini
 GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")
 GEMINI_API_KEY  = os.environ.get("GOOGLE_API_KEY", "")
 
-USE_GROQ = GROQ_API_KEY and GROQ_API_KEY != "PASTE_YOUR_GROQ_KEY_HERE"
+# Initialize Gemini Client (New SDK)
+gemini_client = None
+if GEMINI_API_KEY:
+    gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-if USE_GROQ:
+# Initialize Groq if available
+groq_client = None
+if GROQ_API_KEY and GROQ_API_KEY != "PASTE_YOUR_GROQ_KEY_HERE":
     groq_client = Groq(api_key=GROQ_API_KEY)
-    MODEL = "llama-3.3-70b-versatile"
-    print(f"[LLM] Provider: Groq ({MODEL})")
-else:
-    google_genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = google_genai.GenerativeModel("gemini-1.5-flash-8b")
-    MODEL = "gemini-1.5-flash-8b"
-    print(f"[LLM] Provider: Gemini ({MODEL})")
-
 
 def _call_llm(prompt: str) -> str:
-    """Unified LLM call — uses Groq if configured, else falls back to Gemini."""
-    if USE_GROQ:
-        response = groq_client.chat.completions.create(
-            model=MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=4096,
-        )
-        return response.choices[0].message.content
+    """Try Gemini first; if it fails, fallback to Groq."""
+    
+    # 1. Try Gemini
+    if gemini_client:
+        try:
+            print("[LLM] Attempting Gemini (gemini-2.0-flash)...")
+            response = gemini_client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt
+            )
+            return response.text
+        except Exception as e:
+            print(f"[!] Gemini failed: {e}")
     else:
-        import google.generativeai as genai_legacy
-        genai_legacy.configure(api_key=GEMINI_API_KEY)
-        m = genai_legacy.GenerativeModel("gemini-1.5-flash-8b")
-        return m.generate_content(prompt).text
+        print("[!] Gemini client not initialized.")
+    
+    # 2. Fallback to Groq
+    if groq_client:
+        print("[LLM] Falling back to Groq (llama-3.3-70b)...")
+        try:
+            response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=4096,
+            )
+            return response.choices[0].message.content
+        except Exception as ge:
+            print(f"[!!] Groq fallback also failed: {ge}")
+    else:
+        print("[!] Groq not configured for fallback.")
+    
+    raise Exception("All LLM providers failed.")
 
-
-# Alias for backward compat inside this file
+# Alias for backward compat
 _call_gemini = _call_llm
 
 
 
 def _parse_gemini_json(text: str) -> list:
-    """Cleans and parses Gemini JSON output reliably."""
+    """Cleans and parses Gemini JSON output reliably, handling escaping issues."""
+    import re
     text = text.strip()
-    for wrapper in ["```json", "```"]:
-        text = text.replace(wrapper, "")
+    # Remove markdown code blocks
+    text = re.sub(r'^```(?:json)?', '', text)
+    text = re.sub(r'```$', '', text)
     text = text.strip()
+    
     try:
+        # Try strict first
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        # Try to extract JSON array from within the text
-        start = text.find("[")
-        end = text.rfind("]") + 1
-        if start != -1 and end > start:
-            parsed = json.loads(text[start:end])
-        else:
-            return []
+        try:
+            # Try lenient mode (handles some unescaped control characters)
+            parsed = json.loads(text, strict=False)
+        except json.JSONDecodeError:
+            # Emergency fix: Escape backslashes that aren't already escaped or part of a valid escape
+            # This is common in Windows paths like C:\Users
+            repaired_text = re.sub(r'(?<!\\)\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', text)
+            try:
+                parsed = json.loads(repaired_text, strict=False)
+            except json.JSONDecodeError:
+                # Last resort: extract JSON array
+                start = text.find("[")
+                end = text.rfind("]") + 1
+                if start != -1 and end > start:
+                    try:
+                        parsed = json.loads(text[start:end], strict=False)
+                    except:
+                        return []
+                else:
+                    # Maybe it's a single object?
+                    start = text.find("{")
+                    end = text.rfind("}") + 1
+                    if start != -1 and end > start:
+                        try:
+                            parsed = json.loads(text[start:end], strict=False)
+                        except:
+                            return []
+                    else:
+                        return []
+
     if isinstance(parsed, dict):
         return [parsed]
     if isinstance(parsed, list):
@@ -70,7 +114,7 @@ def _parse_gemini_json(text: str) -> list:
 
 
 def generate_fuzzing_payloads(target_urls: List[str]) -> List[str]:
-    """Uses Gemini to dynamically generate benign testing payloads."""
+    """Uses LLM to dynamically generate benign testing payloads."""
     prompt = f"""
     You are an expert security engineer building a DAST tool.
     Generate 10 highly effective, BENIGN testing payloads for these endpoints:
@@ -79,16 +123,30 @@ def generate_fuzzing_payloads(target_urls: List[str]) -> List[str]:
     Payloads should safely trigger database errors, 500 errors, or reflections.
     Do NOT generate shell exploits or data-destroying payloads.
 
-    Respond ONLY as a valid JSON array of strings. No markdown.
+    Respond ONLY as a valid JSON array of strings. No markdown, no text outside the array.
     Example: ["' OR 1=1 --", "<script>alert(1)</script>", "../../../../etc/passwd"]
     """
     try:
-        print("[*] Asking Gemini to craft custom fuzzing payloads...")
-        text = _call_gemini(prompt)
-        text = text.replace("```json", "").replace("```", "").strip()
-        payloads = json.loads(text)
-        if isinstance(payloads, list):
-            return payloads
+        print("[*] Asking LLM to craft custom fuzzing payloads...")
+        text = _call_llm(prompt)
+        # Use our safe parser which handles markdown and cleaning
+        raw_payloads = _parse_gemini_json(text)
+        
+        # Ensure we only return a list of strings to avoid type-mismatch crashes in the fuzzer
+        clean_payloads = []
+        for p in raw_payloads:
+            if isinstance(p, str):
+                clean_payloads.append(p)
+            elif isinstance(p, dict):
+                # If LLM returned a list of dicts, try to extract the likely payload field
+                val = next(iter(p.values()), str(p))
+                clean_payloads.append(str(val))
+            else:
+                clean_payloads.append(str(p))
+        
+        if clean_payloads:
+            return clean_payloads
+            
     except Exception as e:
         print(f"[!] LLM Payload Generation failed: {e}. Using defaults.")
 
@@ -103,7 +161,7 @@ def generate_fuzzing_payloads(target_urls: List[str]) -> List[str]:
 
 
 def analyze_anomalies(anomalies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Analyzes fuzzer DAST anomalies with Gemini."""
+    """Analyzes fuzzer DAST anomalies with LLM."""
     analyzed_results = []
     if not anomalies:
         return analyzed_results
@@ -118,28 +176,31 @@ def analyze_anomalies(anomalies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         Server Response Snippet:
         {anomaly['response_snippet']}
 
-        Respond as a single JSON object (no markdown):
+        Respond as a single JSON object (no markdown, no extra text):
         {{
           "vulnerability_type": "e.g. SQL Injection",
           "severity": "Low|Medium|High|Critical",
-          "explanation": "2-sentence explanation.",
-          "manual_poc": "Step-by-step benign verification steps."
+          "explanation": "2-sentence explanation of the risk.",
+          "manual_poc": "Step-by-step safe verification steps."
         }}
         """
         try:
-            print(f"[*] Analyzing DAST anomaly on {anomaly['url']}...")
-            text = _call_gemini(prompt)
-            text = text.replace("```json", "").replace("```", "").strip()
-            analysis = json.loads(text)
-            analyzed_results.append({**anomaly, **analysis})
+            print(f"[*] Analyzing DAST anomaly on {anomaly['url']} with LLM...")
+            text = _call_llm(prompt)
+            analysis_list = _parse_gemini_json(text)
+            if analysis_list and isinstance(analysis_list[0], dict):
+                analysis = analysis_list[0]
+                analyzed_results.append({**anomaly, **analysis})
+            else:
+                raise ValueError("LLM did not return a valid analysis object.")
         except Exception as e:
-            print(f"[!] Gemini API error: {e}")
+            print(f"[!] LLM API error: {e}")
             analyzed_results.append({
                 **anomaly,
                 "vulnerability_type": "Analysis Error",
                 "severity": "Unknown",
                 "explanation": str(e)[:200],
-                "manual_poc": "Check backend logs."
+                "manual_poc": "Check backend logs for raw server response."
             })
 
     return analyzed_results

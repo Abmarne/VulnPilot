@@ -3,8 +3,7 @@
 import { useState } from "react";
 
 export default function Home() {
-  const [targetUrl, setTargetUrl] = useState("");
-  const [codebasePath, setCodebasePath] = useState("");
+  const [target, setTarget] = useState("");
   const [sessionCookie, setSessionCookie] = useState("");
   const [loading, setLoading] = useState(false);
   const [scanResult, setScanResult] = useState<any>(null);
@@ -21,8 +20,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-           target_url: targetUrl, 
-           codebase_path: codebasePath || null,
+           target: target, 
            session_cookie: sessionCookie || null 
         }),
       });
@@ -56,32 +54,19 @@ export default function Home() {
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[200%] h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-20"></div>
           
           <div className="space-y-6 relative z-10">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-semibold mb-2 text-neutral-300 tracking-wide uppercase">Target Running App (DAST)</label>
-                  <input
-                    type="url"
-                    required
-                    placeholder="http://localhost:3000"
-                    value={targetUrl}
-                    onChange={(e) => setTargetUrl(e.target.value)}
-                    className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-3 text-emerald-50 focus:outline-none focus:border-emerald-500 transition-all font-mono text-sm"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-semibold mb-2 text-neutral-300 tracking-wide uppercase flex items-center justify-between">
-                    <span>Source Code (SAST)</span>
-                    <span className="text-emerald-500 font-normal text-xs normal-case bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800">New (Hybrid Engine)</span>
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="https://github.com/... OR C:\my-app"
-                    value={codebasePath}
-                    onChange={(e) => setCodebasePath(e.target.value)}
-                    className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-3 text-emerald-50 focus:outline-none focus:border-emerald-500 transition-all font-mono text-sm"
-                  />
-                </div>
+            <div>
+              <label className="block text-sm font-semibold mb-2 text-neutral-300 tracking-wide uppercase flex items-center justify-between">
+                <span>Target (Web URL, GitHub, or Local Path)</span>
+                <span className="text-emerald-500 font-normal text-xs normal-case bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800">Unified Engine</span>
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="https://example.com  OR  https://github.com/user/repo  OR  C:\projects\my-app"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-3 text-emerald-50 focus:outline-none focus:border-emerald-500 transition-all font-mono text-sm"
+              />
             </div>
 
             <div>
