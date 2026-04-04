@@ -160,6 +160,45 @@ def generate_fuzzing_payloads(target_urls: List[str]) -> List[str]:
     ]
 
 
+def identify_sinks(code_context: str) -> List[Dict[str, Any]]:
+    """Analyzes source code to find 'Sinks' (vulnerable functions) and their parameters."""
+    if not code_context:
+        return []
+
+    prompt = f"""
+    You are an expert security code auditor. Analyze this source code to find dangerous 'Sinks' 
+    (parts of the code that handle user input unsafely).
+    
+    Find occurrences of:
+    - Raw SQL queries (SQLi)
+    - System command execution (RCE)
+    - User input reflected in HTML (XSS)
+    - File system access (LFI/Path Traversal)
+    - Unauthenticated API routes
+    
+    SOURCE CODE:
+    {code_context}
+    
+    Respond ONLY as a valid JSON array of objects (no markdown, no extra text):
+    [
+      {{
+        "url_pattern": "e.g. /api/search",
+        "param": "e.g. q",
+        "vulnerability_type": "sql_injection | command_injection | xss | path_traversal",
+        "sink_line": "The exact code line where the sink is"
+      }}
+    ]
+    """
+    try:
+        print("[*] Identifying potential sinks in source code with LLM...")
+        text = _call_llm(prompt)
+        sinks = _parse_gemini_json(text)
+        return sinks if isinstance(sinks, list) else []
+    except Exception as e:
+        print(f"[!] Sink identification failed: {e}")
+        return []
+
+
 def analyze_anomalies(anomalies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Analyzes fuzzer DAST anomalies with LLM."""
     analyzed_results = []

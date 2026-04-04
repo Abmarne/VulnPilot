@@ -7,6 +7,7 @@ from crawler import ReconCrawler
 from fuzzer import Fuzzer
 import llm
 from sast_engine import SastEngine
+from header_analyzer import analyze_headers
 
 app = FastAPI(title="VulnPilot Backend", description="Hybrid DAST+SAST Orchestrator")
 
@@ -58,35 +59,45 @@ async def start_scan(request: ScanRequest):
 
     print(f"\n--- [ SCAN INITIATED ] ---")
     
-    # 1 & 2. Recon and Fuzzing (DAST)
-    raw_anomalies = []
-    endpoints_count = 0
+    # 1. Recon (DAST Surface Discovery)
+    endpoints = []
     if target_url:
         print(f"[*] Starting Black/Grey Box Discovery on {target_url}...")
         crawler = ReconCrawler(target_url, request.session_cookie)
         endpoints = crawler.map_surface()
-        endpoints_count = len(endpoints)
-        
-        if endpoints:
-            fuzzer = Fuzzer(endpoints, request.session_cookie)
-            raw_anomalies = fuzzer.run_fuzzer(target_url)
-        else:
-            print("[!] Crawler could not find any valid endpoints for DAST.")
             
-    # 3. Codebase Extraction (SAST)
+    # 2. Codebase Extraction & Sink Discovery (SAST)
     code_context = ""
+    guided_insights = []
     if codebase_path:
         print(f"\n--- [ EXTRACTING SOURCE CODE ] ---")
         sast = SastEngine(codebase_path)
         sast.prepare_codebase()
         code_context = sast.extract_critical_files()
+        guided_insights = llm.identify_sinks(code_context)
         sast.cleanup()
+    
+    # 3. Hybrid Fuzzing (Guided DAST)
+    raw_anomalies = []
+    endpoints_count = len(endpoints)
+    if endpoints:
+        fuzzer = Fuzzer(endpoints, request.session_cookie, guided_insights=guided_insights)
+        raw_anomalies = fuzzer.run_fuzzer(target_url)
+    elif target_url:
+        print("[!] Crawler could not find any valid endpoints for DAST.")
     
     if not target_url and not code_context:
         return {"status": "error", "message": "No valid targets found (web URL or valid codebase).", "job_id": "job_0", "findings": []}
 
-    # 4. LLM Analysis (Hybrid, DAST-only, or SAST-only)
+    # 4. Built-in Security Analysis (New)
+    header_findings = []
+    if target_url:
+        print(f"[*] Analyzing security headers for {target_url}...")
+        header_findings = analyze_headers(target_url)
+
+    # 5. LLM Analysis (Hybrid, DAST-only, or SAST-only)
     analyzed_findings = llm.analyze_hybrid(raw_anomalies, code_context)
+    analyzed_findings.extend(header_findings)
 
     print(f"--- [ SCAN COMPLETE ] ---")
     print(f"Total Findings: {len(analyzed_findings)}\n")
