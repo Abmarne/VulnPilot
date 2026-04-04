@@ -31,44 +31,58 @@ class SastEngine:
 
     def extract_critical_files(self) -> str:
         """
-        Extracts key React/Next.js files into a concatenated string constraint.
+        Extracts ALL React/Next.js source files into a concatenated string for LLM analysis.
         """
         code_context = ""
         if not self.target_dir:
             return code_context
             
-        extensions_to_scan = ['.tsx', '.ts', '.js', '.jsx', '.json']
-        max_files = 30 # Limit for context window safely
+        extensions_to_scan = ['.tsx', '.ts', '.js', '.jsx', '.env', '.py']
+        # Always include package.json but never lock files (huge, no vulns)
+        include_filenames = {'package.json'}
+        exclude_filenames = {'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '.gitignore'}
+        max_files = 20
         files_scanned = 0
         
-        print("[*] Performing static extraction of critical framework files...")
+        print("[*] Extracting source files for SAST analysis...")
         
         for root, dirs, files in os.walk(self.target_dir):
-            # Exclude node_modules and hidden git files
-            dirs[:] = [d for d in dirs if not d.startswith('.') and 'node_modules' not in d]
+            # Exclude noisy directories
+            dirs[:] = [d for d in dirs if d not in {
+                'node_modules', '.git', '.next', '__pycache__', 'dist', 'build', '.turbo', 'venv'
+            }]
             
             for file in files:
-                if any(file.endswith(ext) for ext in extensions_to_scan):
-                    file_path = os.path.join(root, file)
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            # Key indicators of potential risk in React stacks
-                            keywords = ['use server', 'getServerSideProps', 'dangerouslySetInnerHTML', 'apiKey', 'password', 'query(', 'execute(']
-                            if any(kw in content for kw in keywords) or file == "package.json":
-                                rel_path = os.path.relpath(file_path, self.target_dir)
-                                code_context += f"\n\n--- FILE PATH: {rel_path} ---\n```\n{content[:2500]}\n```\n"
-                                files_scanned += 1
-                                
-                    except Exception:
-                        pass
+                is_included = file in include_filenames
+                is_excluded = file in exclude_filenames
+                has_ext = any(file.endswith(ext) for ext in extensions_to_scan)
+                
+                if is_excluded or (not is_included and not has_ext):
+                    continue
+                    
+                file_path = os.path.join(root, file)
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    
+                    if not content.strip():
+                        continue
+                        
+                    rel_path = os.path.relpath(file_path, self.target_dir)
+                    # Cap each file at 800 chars to minimize token usage on free tier
+                    code_context += f"\n\n--- FILE PATH: {rel_path} ---\n```\n{content[:800]}\n```\n"
+                    files_scanned += 1
+                    print(f"  [+] Queued: {rel_path}")
+                        
+                except Exception as e:
+                    print(f"  [!] Could not read {file_path}: {e}")
                         
                 if files_scanned >= max_files:
                     break
             if files_scanned >= max_files:
                 break
                 
-        print(f"[*] Extracted {files_scanned} critical files for SAST LLM context.")
+        print(f"[*] Extraction complete: {files_scanned} files queued for Gemini SAST analysis.")
         return code_context
         
     def cleanup(self):

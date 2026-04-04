@@ -71,5 +71,16 @@ async def start_scan(request: ScanRequest):
         "findings": analyzed_findings
     }
 
+@app.get("/api/debug/sast")
+async def debug_sast(codebase_path: str):
+    """Debug endpoint: shows what files SAST engine extracts without calling Gemini."""
+    sast = SastEngine(codebase_path)
+    sast.prepare_codebase()
+    ctx = sast.extract_critical_files()
+    files = [line.replace("--- FILE PATH: ", "").split(" ---")[0].strip()
+             for line in ctx.splitlines() if "--- FILE PATH:" in line]
+    sast.cleanup()
+    return {"files_found": len(files), "files": files, "total_chars": len(ctx)}
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
