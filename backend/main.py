@@ -1,5 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+import json
+import asyncio
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import uvicorn
@@ -30,84 +32,147 @@ class ScanResponse(BaseModel):
     job_id: str
     findings: List[Dict[str, Any]]
 
-@app.post("/api/scan/start", response_model=ScanResponse)
-async def start_scan(request: ScanRequest):
-    input_targets = [t.strip() for t in request.target.split(",") if t.strip()]
-    target_url = None
-    codebase_path = None
-    
-    for t in input_targets:
-        is_github = "github.com" in t.lower()
-        is_http = t.lower().startswith(("http://", "https://"))
-        
-        if is_github:
-            if not is_http:
-                t = "https://" + t
-            codebase_path = t
-            print(f"[*] Detected GitHub repository as target: {codebase_path}")
-        elif is_http:
-            target_url = t
-            print(f"[*] Detected Web Application as target: {target_url}")
-        elif "." in t and "/" not in t and "\\" not in t:
-            # Probable domain name like "example.com"
-            target_url = "http://" + t
-            print(f"[*] Detected Domain as target: {target_url}")
-        else:
-            # Assume local path
-            codebase_path = t
-            print(f"[*] Detected Local Codebase as target: {codebase_path}")
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
 
-    print(f"\n--- [ SCAN INITIATED ] ---")
-    
-    # 1. Recon (DAST Surface Discovery)
-    endpoints = []
-    if target_url:
-        print(f"[*] Starting Black/Grey Box Discovery on {target_url}...")
-        crawler = ReconCrawler(target_url, request.session_cookie)
-        endpoints = crawler.map_surface()
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def send_personal_message(self, message: dict, websocket: WebSocket):
+        await websocket.send_json(message)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            await connection.send_json(message)
+
+manager = ConnectionManager()
+
+async def emit_log(websocket: WebSocket, text: str, stage: str = "general"):
+    """Sends a log message to the client over WebSocket."""
+    await manager.send_personal_message({
+        "type": "log",
+        "message": text,
+        "stage": stage
+    }, websocket)
+
+async def emit_progress(websocket: WebSocket, stage: str, percent: int):
+    """Sends progress update to the client over WebSocket."""
+    await manager.send_personal_message({
+        "type": "progress",
+        "stage": stage,
+        "percent": percent
+    }, websocket)
+
+async def emit_finding(websocket: WebSocket, finding: Dict[str, Any]):
+    """Sends a new vulnerability finding to the client over WebSocket."""
+    await manager.send_personal_message({
+        "type": "finding",
+        "data": finding
+    }, websocket)
+
+@app.websocket("/api/scan/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            request_data = json.loads(data)
             
-    # 2. Codebase Extraction & Sink Discovery (SAST)
-    code_context = ""
-    guided_insights = []
-    if codebase_path:
-        print(f"\n--- [ EXTRACTING SOURCE CODE ] ---")
-        sast = SastEngine(codebase_path)
-        sast.prepare_codebase()
-        code_context = sast.extract_critical_files()
-        guided_insights = llm.identify_sinks(code_context)
-        sast.cleanup()
-    
-    # 3. Hybrid Fuzzing (Guided DAST)
-    raw_anomalies = []
-    endpoints_count = len(endpoints)
-    if endpoints:
-        fuzzer = Fuzzer(endpoints, request.session_cookie, guided_insights=guided_insights)
-        raw_anomalies = fuzzer.run_fuzzer(target_url)
-    elif target_url:
-        print("[!] Crawler could not find any valid endpoints for DAST.")
-    
-    if not target_url and not code_context:
-        return {"status": "error", "message": "No valid targets found (web URL or valid codebase).", "job_id": "job_0", "findings": []}
+            if request_data.get("type") == "START_SCAN":
+                target = request_data.get("target", "")
+                session_cookie = request_data.get("session_cookie", None)
+                
+                await emit_log(websocket, "--- [ SCAN INITIATED VIA WS ] ---", "init")
+                await emit_progress(websocket, "init", 5)
+                
+                input_targets = [t.strip() for t in target.split(",") if t.strip()]
+                target_url = None
+                codebase_path = None
+                
+                for t in input_targets:
+                    is_github = "github.com" in t.lower()
+                    is_http = t.lower().startswith(("http://", "https://"))
+                    
+                    if is_github:
+                        if not is_http: t = "https://" + t
+                        codebase_path = t
+                        await emit_log(websocket, f"[*] Detected GitHub: {codebase_path}", "init")
+                    elif is_http:
+                        target_url = t
+                        await emit_log(websocket, f"[*] Detected Web App: {target_url}", "init")
+                    elif "." in t and "/" not in t and "\\" not in t:
+                        target_url = "http://" + t
+                        await emit_log(websocket, f"[*] Detected Domain: {target_url}", "init")
+                    else:
+                        codebase_path = t
+                        await emit_log(websocket, f"[*] Detected Local Code: {codebase_path}", "init")
 
-    # 4. Built-in Security Analysis (New)
-    header_findings = []
-    if target_url:
-        print(f"[*] Analyzing security headers for {target_url}...")
-        header_findings = analyze_headers(target_url)
-
-    # 5. LLM Analysis (Hybrid, DAST-only, or SAST-only)
-    analyzed_findings = llm.analyze_hybrid(raw_anomalies, code_context)
-    analyzed_findings.extend(header_findings)
-
-    print(f"--- [ SCAN COMPLETE ] ---")
-    print(f"Total Findings: {len(analyzed_findings)}\n")
-
-    return {
-        "status": "success",
-        "message": f"Scan completed. Analyzed {endpoints_count} endpoints and codebase context. Found {len(analyzed_findings)} potential issues.",
-        "job_id": "job_12345",
-        "findings": analyzed_findings
-    }
+                await emit_progress(websocket, "recon", 10)
+                
+                # 1. Recon (DAST Surface Discovery)
+                endpoints = []
+                if target_url:
+                    await emit_log(websocket, f"[*] Recon: Crawling {target_url}...", "recon")
+                    crawler = ReconCrawler(target_url, session_cookie)
+                    endpoints = crawler.map_surface()
+                    await emit_log(websocket, f"[*] Recon: Found {len(endpoints)} endpoints.", "recon")
+                
+                await emit_progress(websocket, "sast", 30)
+                        
+                # 2. Codebase Extraction & Sink Discovery (SAST)
+                code_context = ""
+                guided_insights = []
+                if codebase_path:
+                    await emit_log(websocket, "[*] SAST: Extracting source code...", "sast")
+                    sast = SastEngine(codebase_path)
+                    sast.prepare_codebase()
+                    code_context = sast.extract_critical_files()
+                    await emit_log(websocket, "[*] SAST: Running AI Sink Analysis...", "sast")
+                    guided_insights = llm.identify_sinks(code_context)
+                    await emit_log(websocket, f"[*] SAST: Found {len(guided_insights)} potential code sinks.", "sast")
+                    sast.cleanup()
+                
+                await emit_progress(websocket, "fuzzing", 50)
+                
+                # 3. Hybrid Fuzzing (Guided DAST)
+                raw_anomalies = []
+                if endpoints:
+                    await emit_log(websocket, f"[*] Fuzzing: Launching guided assault on {len(endpoints)} targets...", "fuzzing")
+                    fuzzer = Fuzzer(endpoints, session_cookie, guided_insights=guided_insights)
+                    raw_anomalies = fuzzer.run_fuzzer(target_url)
+                    await emit_log(websocket, f"[*] Fuzzing: Detected {len(raw_anomalies)} raw anomalies.", "fuzzing")
+                
+                await emit_progress(websocket, "analysis", 80)
+                
+                # 4. Built-in Security Analysis (Headers)
+                header_findings = []
+                if target_url:
+                    await emit_log(websocket, "[*] Analyzing security headers...", "analysis")
+                    header_findings = analyze_headers(target_url)
+                    for hf in header_findings:
+                        await emit_finding(websocket, hf)
+                
+                # 5. LLM Analysis
+                await emit_log(websocket, "[*] Finalizing Hybrid Analysis with Gemini...", "analysis")
+                all_findings = llm.analyze_hybrid(raw_anomalies, code_context)
+                
+                for f in all_findings:
+                    await emit_finding(websocket, f)
+                
+                await emit_progress(websocket, "complete", 100)
+                await emit_log(websocket, "--- [ SCAN COMPLETE ] ---", "complete")
+                
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        await emit_log(websocket, f"Error: {e}", "error")
+        manager.disconnect(websocket)
 
 @app.get("/api/debug/sast")
 async def debug_sast(codebase_path: str):
