@@ -69,8 +69,8 @@ class SastEngine:
                         continue
                         
                     rel_path = os.path.relpath(file_path, self.target_dir)
-                    # Cap each file at 800 chars to minimize token usage on free tier
-                    code_context += f"\n\n--- FILE PATH: {rel_path} ---\n```\n{content[:800]}\n```\n"
+                    # Increased crop for better import/dependency visibility
+                    code_context += f"\n\n--- FILE PATH: {rel_path} ---\n```\n{content[:1500]}\n```\n"
                     files_scanned += 1
                     print(f"  [+] Queued: {rel_path}")
                         
@@ -84,6 +84,26 @@ class SastEngine:
                 
         print(f"[*] Extraction complete: {files_scanned} files queued for Gemini SAST analysis.")
         return code_context
+
+    def get_file_content(self, rel_path: str) -> str:
+        """Retrieves the full content of a specific file by its relative path."""
+        if not self.target_dir:
+            return ""
+        
+        file_path = os.path.join(self.target_dir, rel_path)
+        if not os.path.exists(file_path):
+            # Attempt to find it if AI didn't provide exact path
+            for root, _, files in os.walk(self.target_dir):
+                for f in files:
+                    if f == os.path.basename(rel_path):
+                        file_path = os.path.join(root, f)
+                        break
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                return f.read()
+        except:
+            return ""
         
     def cleanup(self):
         if self.is_github and self.temp_dir and os.path.exists(self.temp_dir):

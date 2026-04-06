@@ -163,6 +163,28 @@ async def websocket_endpoint(websocket: WebSocket):
                     await emit_log(websocket, "[*] SAST: Running AI Sink Analysis...", "sast")
                     guided_insights = llm.identify_sinks(code_context)
                     await emit_log(websocket, f"[*] SAST: Found {len(guided_insights)} potential code sinks.", "sast")
+                    
+                    # 2b. Taint-Chasing: Deep Context Fetching
+                    for sink in guided_insights:
+                        deps = sink.get("required_context", [])
+                        if deps:
+                            await emit_log(websocket, f"[*] SAST: Taint-Chasing dependencies for {sink['url_pattern']}...", "sast")
+                            extra_code = ""
+                            for dep_path in deps:
+                                content = sast.get_file_content(dep_path)
+                                if content:
+                                    extra_code += f"\n--- DEPENDENCY PATH: {dep_path} ---\n{content}\n"
+                                    await emit_log(websocket, f"  [>] Fetched context: {dep_path}", "sast")
+                            
+                            if extra_code:
+                                verdict = llm.deep_taint_audit(sink, extra_code)
+                                if verdict:
+                                    sink.update(verdict)
+                                    if verdict.get("verdict") == "False Positive":
+                                        await emit_log(websocket, f"  [-] Logic Check: Verified False Positive for {sink['url_pattern']}", "sast")
+                                    elif verdict.get("verdict") == "Verified":
+                                        await emit_log(websocket, f"  [!] Logic Check: PROVEN VULNERABLE for {sink['url_pattern']}", "sast")
+                    
                     sast.cleanup()
                 
                 await emit_progress(websocket, "fuzzing", 50)

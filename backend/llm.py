@@ -185,7 +185,8 @@ def identify_sinks(code_context: str) -> List[Dict[str, Any]]:
         "url_pattern": "e.g. /api/search",
         "param": "e.g. q",
         "vulnerability_type": "sql_injection | command_injection | xss | path_traversal",
-        "sink_line": "The exact code line where the sink is"
+        "sink_line": "The exact code line where the sink is",
+        "required_context": ["list", "of", "relative", "paths", "to", "imported", "files", "e.g.", "utils/db.js"]
       }}
     ]
     """
@@ -235,6 +236,48 @@ def reconstruct_api_schema(js_content: str) -> List[Dict[str, Any]]:
     except Exception as e:
         print(f"[!] API reconstruction failed: {e}")
         return []
+
+
+def deep_taint_audit(vulnerability_chain: Dict[str, Any], extra_context: str) -> Dict[str, Any]:
+    """Performs a high-confidence audit across multiple files to verify a taint path."""
+    if not extra_context:
+        return vulnerability_chain
+
+    prompt = f"""
+    You are an elite security researcher performs a multi-file 'Taint Analysis'.
+    
+    INITIAL FINDING:
+    - Type: {vulnerability_chain.get('vulnerability_type')}
+    - Sink: {vulnerability_chain.get('sink_line')}
+    - Context: {vulnerability_chain.get('explanation', 'N/A')}
+    
+    DEEP CONTEXT (Found in imported/dependent files):
+    {extra_context[:20000]}
+    
+    TASK:
+    1. Determine if the 'Taint' (user input) is properly sanitized in the DEEP CONTEXT files.
+    2. If a sanitizer like 'mysql.escape()' or 'DOMPurify.sanitize()' is used effectively, 
+       this is a FALSE POSITIVE.
+    3. If no sanitization exists or it is bypassed, this is a VERIFIED CRITICAL BUG.
+    
+    Respond as a single JSON object:
+    {{
+      "is_verified": "boolean: true if bug is proven through cross-file check",
+      "verdict": "Verified | False Positive | Suspicious",
+      "explanation": "Detailed explanation of the multi-file flow.",
+      "remediation_code": "Corrected versions of ALL involved files."
+    }}
+    """
+    try:
+        print(f"[*] Auditing Taint Chain for {vulnerability_chain.get('url_pattern')}...")
+        text = _call_llm(prompt)
+        verdict_list = _parse_gemini_json(text)
+        if verdict_list and isinstance(verdict_list[0], dict):
+            return verdict_list[0]
+    except Exception as e:
+        print(f"[!] Taint audit failed: {e}")
+    
+    return {}
 
 
 def analyze_anomalies(anomalies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
