@@ -220,8 +220,10 @@ def analyze_anomalies(anomalies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
           "vulnerability_type": "e.g. SQL Injection",
           "severity": "Low|Medium|High|Critical",
           "explanation": "2-sentence explanation of the risk.",
-          "manual_poc": "Step-by-step manual verification steps.",
-          "poc_script": "A copy-pasteable Python or Curl script to reproduce the vulnerability (safely)."
+          "manual_poc": "Step-by-step manual verification and validation.",
+          "poc_script": "A copy-pasteable Python or Curl script to reproduce the vulnerability (safely).",
+          "remediation_code": "The SECURE version of the code that fixes this bug (e.g. using parameterized queries).",
+          "remediation_steps": "Step-by-step resolution plan for developers (and 3rd party tools)."
         }}
         """
         try:
@@ -282,8 +284,10 @@ def _analyze_file_batch(file_blocks: List[str], anomalies: List[Dict[str, Any]])
         "severity": "Info|Low|Medium|High|Critical",
         "url": "exact relative filename from the FILE PATH header above each code block",
         "explanation": "2-sentence explanation of the risk.",
-        "manual_poc": "Step-by-step manual verification and exact remediation snippet.",
-        "poc_script": "A copy-pasteable Python or Curl script to reproduce the vulnerability (safely)."
+        "manual_poc": "Step-by-step manual verification and validation.",
+        "poc_script": "A copy-pasteable Python or Curl script to reproduce the vulnerability (safely).",
+        "remediation_code": "The SECURE version of the code that fixes this bug (e.g. using process.env or parameterized queries).",
+        "remediation_steps": "Step-by-step resolution plan for developers (and 3rd party tools)."
       }}
     ]
     """

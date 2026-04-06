@@ -260,6 +260,49 @@ export default function Home() {
                             </div>
                           )}
                         </div>
+
+                        {/* New Remediation Section */}
+                        {(finding.remediation_code || finding.remediation_steps) && (
+                          <div className="mt-8 pt-6 border-t border-neutral-800/50 animate-in slide-in-from-top-4 duration-500">
+                             <h4 className="text-[10px] uppercase font-bold text-emerald-400 mb-4 tracking-widest flex items-center gap-2">
+                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
+                               🛡️ Secure Implementation & Remediation
+                             </h4>
+                             
+                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                               {/* Steps / Plan */}
+                               <div className="md:col-span-1 space-y-3">
+                                  <span className="text-[9px] uppercase text-neutral-500 font-bold tracking-tighter block mb-2">Resolution Plan</span>
+                                  <div className="text-xs text-neutral-300 space-y-2 font-light">
+                                    {finding.remediation_steps?.split('\n').map((step: string, i: number) => (
+                                      <div key={i} className="flex gap-2 leading-relaxed">
+                                        <span className="text-emerald-500 font-bold shrink-0">{i + 1}.</span>
+                                        <p>{step.trim().replace(/^\d+\.\s*/, '')}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                               </div>
+
+                               {/* Secure Code */}
+                               <div className="md:col-span-2">
+                                  <div className="bg-emerald-950/20 rounded-xl border border-emerald-500/20 p-5 relative group overflow-hidden">
+                                     <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button 
+                                          onClick={() => navigator.clipboard.writeText(finding.remediation_code)}
+                                          className="bg-emerald-500 text-neutral-950 px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-emerald-400 transition-all"
+                                        >
+                                          Copy Fix
+                                        </button>
+                                     </div>
+                                     <span className="text-[9px] uppercase text-emerald-500/70 font-bold tracking-tighter block mb-3">Safe Code Snippet</span>
+                                     <pre className="text-xs font-mono text-emerald-50 overflow-x-auto scrollbar-thin scrollbar-thumb-emerald-900/50">
+                                       <code>{finding.remediation_code}</code>
+                                     </pre>
+                                  </div>
+                               </div>
+                             </div>
+                          </div>
+                        )}
                     </div>
                 );
             })}
