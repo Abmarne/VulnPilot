@@ -199,6 +199,44 @@ def identify_sinks(code_context: str) -> List[Dict[str, Any]]:
         return []
 
 
+def reconstruct_api_schema(js_content: str) -> List[Dict[str, Any]]:
+    """Analyzes client-side JS to find hidden API endpoints and their parameters."""
+    if not js_content or len(js_content) < 50:
+        return []
+
+    prompt = f"""
+    You are an expert security engineer reverse-engineering a web application.
+    Analyze the following JavaScript code to find ALL internal API endpoints it communicates with.
+    
+    Look for:
+    - fetch(), axios(), $.ajax(), XMLHttpRequest calls
+    - URL strings that look like API routes (e.g., /api/v1/user)
+    - Query parameters, POST body fields, or JSON keys used in these requests
+    - Custom headers (e.g., X-Auth-Token)
+    
+    JAVASCRIPT CODE:
+    {js_content[:15000]} # Limit context to avoid token bloat
+    
+    Respond ONLY as a valid JSON array of objects (no markdown, no extra text):
+    [
+      {{
+        "url": "the full or relative path discovered",
+        "method": "GET | POST | PUT | DELETE",
+        "params": ["list", "of", "query", "params"],
+        "form_fields": ["list", "of", "POST", "body", "fields", "or", "JSON", "keys"]
+      }}
+    ]
+    """
+    try:
+        print("[*] Reconstructing API surface from JavaScript with LLM...")
+        text = _call_llm(prompt)
+        endpoints = _parse_gemini_json(text)
+        return endpoints if isinstance(endpoints, list) else []
+    except Exception as e:
+        print(f"[!] API reconstruction failed: {e}")
+        return []
+
+
 def analyze_anomalies(anomalies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Analyzes fuzzer DAST anomalies with LLM."""
     analyzed_results = []

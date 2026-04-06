@@ -120,8 +120,35 @@ async def websocket_endpoint(websocket: WebSocket):
                 if target_url:
                     await emit_log(websocket, f"[*] Recon: Crawling {target_url}...", "recon")
                     crawler = ReconCrawler(target_url, session_cookie)
-                    endpoints = crawler.map_surface()
-                    await emit_log(websocket, f"[*] Recon: Found {len(endpoints)} endpoints.", "recon")
+                    discovery_data = crawler.map_surface()
+                    endpoints = discovery_data.get("endpoints", [])
+                    js_urls = discovery_data.get("js_urls", [])
+                    
+                    await emit_log(websocket, f"[*] Recon: Found {len(endpoints)} surface endpoints and {len(js_urls)} scripts.", "recon")
+                    
+                    # 1b. Semantic API Reconstruction (Ghost Endpoints)
+                    if js_urls:
+                        await emit_log(websocket, "[*] Recon: Analyzing JavaScript for hidden API routes...", "recon")
+                        ghost_count = 0
+                        for js_url in js_urls[:5]: # Analyze top 5 scripts to balance depth vs speed
+                            await emit_log(websocket, f"  [>] Analyzing {js_url.split('/')[-1]}...", "recon")
+                            js_content = crawler.fetch_js_content(js_url)
+                            if js_content:
+                                discovered_api = llm.reconstruct_api_schema(js_content)
+                                for ep in discovered_api:
+                                    # Normalize URL
+                                    if ep["url"].startswith("/"):
+                                        ep["url"] = target_url + ep["url"]
+                                    
+                                    # Avoid duplicates
+                                    if not any(e["url"] == ep["url"] for e in endpoints):
+                                        endpoints.append(ep)
+                                        ghost_count += 1
+                                        await emit_log(websocket, f"  [+] GHOST ENDPOINT: {ep['method']} {ep['url']}", "recon")
+                        
+                        if ghost_count > 0:
+                            await emit_log(websocket, f"[*] Recon: Added {ghost_count} hidden 'Ghost Endpoints' to attack surface.", "recon")
+                
                 
                 await emit_progress(websocket, "sast", 30)
                         
