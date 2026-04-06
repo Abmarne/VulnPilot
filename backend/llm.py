@@ -212,6 +212,8 @@ def analyze_anomalies(anomalies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         Target URL: {anomaly['url']}
         Payload Used: {anomaly['payload']}
         Fuzzer Finding: {anomaly['anomaly']}
+        Is Verified (Double-Blind Test Passed): {anomaly.get('verified', False)}
+        Validation Proof Detail: {anomaly.get('validation_proof', 'N/A')}
         Server Response Snippet:
         {anomaly['response_snippet']}
 
@@ -223,7 +225,8 @@ def analyze_anomalies(anomalies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
           "manual_poc": "Step-by-step manual verification and validation.",
           "poc_script": "A copy-pasteable Python or Curl script to reproduce the vulnerability (safely).",
           "remediation_code": "The SECURE version of the code that fixes this bug (e.g. using parameterized queries).",
-          "remediation_steps": "Step-by-step resolution plan for developers (and 3rd party tools)."
+          "remediation_steps": "Step-by-step resolution plan for developers (and 3rd party tools).",
+          "is_verified": "boolean: true if the fuzzer logically proved this bug"
         }}
         """
         try:

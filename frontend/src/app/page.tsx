@@ -218,7 +218,14 @@ export default function Home() {
                         <div className={`absolute top-0 left-0 w-1 h-full ${sev === 'critical' ? 'bg-purple-500' : sev === 'high' ? 'bg-red-500' : 'bg-emerald-500'}`}></div>
                         
                         <div className="flex justify-between items-start mb-4">
-                          <h3 className="text-xl font-bold text-white">{finding.vulnerability_type}</h3>
+                          <div className="flex flex-col gap-1">
+                            <h3 className="text-xl font-bold text-white">{finding.vulnerability_type}</h3>
+                            {finding.is_verified && (
+                              <div className="flex items-center gap-1.5 text-[10px] font-black text-emerald-400 uppercase tracking-tighter bg-emerald-400/10 border border-emerald-400/20 px-2 py-0.5 rounded-md w-fit animate-pulse">
+                                <span className="text-xs">🛡️</span> Verified Proof
+                              </div>
+                            )}
+                          </div>
                           <span className={`px-2 py-1 rounded border text-[10px] font-bold uppercase tracking-widest ${sevColor}`}>
                             {finding.severity || "Unknown"}
                           </span>
