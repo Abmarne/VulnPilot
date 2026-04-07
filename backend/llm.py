@@ -280,6 +280,45 @@ def deep_taint_audit(vulnerability_chain: Dict[str, Any], extra_context: str) ->
     return {}
 
 
+def get_refactored_file(original_code: str, vulnerability_details: Dict[str, Any]) -> str:
+    """Uses LLM to refactor an entire source file to fix a specific security bug."""
+    if not original_code:
+        return ""
+
+    prompt = f"""
+    You are an expert security engineer performing a 'Secure Code Refactor'.
+    
+    VULNERABILITY TO FIX:
+    - Type: {vulnerability_details.get('vulnerability_type')}
+    - Risk: {vulnerability_details.get('explanation')}
+    - Suggested Fix: {vulnerability_details.get('remediation_code')}
+    
+    ORIGINAL SOURCE CODE:
+    ```
+    {original_code}
+    ```
+    
+    TASK:
+    1. Rewrite the entire file above to eliminate the security vulnerability.
+    2. DO NOT change any unrelated logic, function names, or application behavior.
+    3. PRESERVE all comments, variable names, and stylistic formatting where possible.
+    4. Ensure the output is syntactically valid and ready to be saved to disk.
+    
+    Respond ONLY with the complete, refactored source code. No markdown, no introductory text, no explanations. Just the code.
+    """
+    try:
+        print(f"[*] AI is refactoring file to fix {vulnerability_details.get('vulnerability_type')}...")
+        text = _call_llm(prompt)
+        # Cleanup any accidental markdown markers
+        import re
+        text = re.sub(r'^```[a-zA-Z]*\n', '', text)
+        text = re.sub(r'\n```$', '', text)
+        return text.strip()
+    except Exception as e:
+        print(f"[!] AI refactoring failed: {e}")
+        return ""
+
+
 def analyze_anomalies(anomalies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Analyzes fuzzer DAST anomalies with LLM."""
     analyzed_results = []

@@ -104,6 +104,24 @@ class SastEngine:
                 return f.read()
         except:
             return ""
+
+    def write_file_content(self, rel_path: str, new_content: str) -> bool:
+        """Safely overwrites a file with new content (for auto-remediation)."""
+        if not self.target_dir or not new_content:
+            return False
+            
+        file_path = os.path.join(self.target_dir, rel_path)
+        # Final directory path check
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            print(f"[*] Success: Applied security fix to {rel_path}")
+            return True
+        except Exception as e:
+            print(f"[!] Write failed for {rel_path}: {e}")
+            return False
         
     def cleanup(self):
         if self.is_github and self.temp_dir and os.path.exists(self.temp_dir):

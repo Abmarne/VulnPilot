@@ -161,3 +161,41 @@ class ScannerEngine:
         await self._emit_progress("complete", 100)
         await self._emit_log("--- [ SCAN COMPLETE ] ---", "complete")
         return self.all_findings
+
+    async def apply_remediation(self, finding: Dict[str, Any]) -> bool:
+        """Tries to fix a vulnerability by refactoring the source file."""
+        rel_path = finding.get("url") or finding.get("url_pattern")
+        if not rel_path or "/" not in rel_path and "\\" not in rel_path and "." not in rel_path:
+            # If it's a URL pattern (e.g. /api/search), we can't easily map to file without more info
+            # Usually SAST findings have a clear 'url' as filename
+            await self._emit_log(f"[!] Cannot auto-fix: Finding is not tied to a specific local file.", "error")
+            return False
+
+        # Build codebase context for the specific file
+        # We need a SastEngine instance to read/write
+        input_targets = [t.strip() for t in self.target.split(",") if t.strip()]
+        codebase_path = next((t for t in input_targets if "http" not in t.lower() or "github" not in t.lower()), None)
+        
+        if not codebase_path:
+             await self._emit_log(f"[!] Cannot auto-fix: No local codebase path detected.", "error")
+             return False
+
+        sast = SastEngine(codebase_path)
+        sast.prepare_codebase()
+        original_code = sast.get_file_content(rel_path)
+        
+        if not original_code:
+            await self._emit_log(f"[!] Cannot auto-fix: Could not read source for {rel_path}", "error")
+            return False
+
+        await self._emit_log(f"[*] Starting AI-powered refactor for {rel_path}...", "analysis")
+        refactored_code = llm.get_refactored_file(original_code, finding)
+        
+        if refactored_code:
+            success = sast.write_file_content(rel_path, refactored_code)
+            if success:
+                await self._emit_log(f"[🛡️] SUCCESS: Security fix applied to {rel_path}", "analysis")
+                return True
+        
+        await self._emit_log(f"[!] FAILED: AI could not safely refactor {rel_path}", "error")
+        return False

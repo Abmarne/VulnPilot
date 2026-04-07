@@ -10,6 +10,8 @@ export default function Home() {
   const [logs, setLogs] = useState<{ message: string; stage: string }[]>([]);
   const [progress, setProgress] = useState({ stage: "init", percent: 0 });
   const [errorInfo, setErrorInfo] = useState<string | null>(null);
+  const [fixingUrls, setFixingUrls] = useState<Record<string, boolean>>({});
+  const [fixStatus, setFixStatus] = useState<Record<string, "success" | "error" | null>>({});
   
   const ws = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -51,6 +53,10 @@ export default function Home() {
         setProgress({ stage: data.stage, percent: data.percent });
       } else if (data.type === "finding") {
         setFindings(prev => [...prev, data.data]);
+      } else if (data.type === "fix_status") {
+        setFixingUrls(prev => ({ ...prev, [data.url]: false }));
+        setFixStatus(prev => ({ ...prev, [data.url]: data.success ? "success" : "error" }));
+        setTimeout(() => setFixStatus(prev => ({ ...prev, [data.url]: null })), 5000);
       }
     };
 
@@ -64,6 +70,19 @@ export default function Home() {
       setErrorInfo("WebSocket connection failed. Ensure backend is running.");
       setLoading(false);
     };
+  };
+
+  const applyFix = (finding: any) => {
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+    
+    const url = finding.url || finding.url_pattern;
+    setFixingUrls(prev => ({ ...prev, [url]: true }));
+    
+    ws.current.send(JSON.stringify({
+      type: "APPLY_FIX",
+      target: target,
+      finding: finding
+    }));
   };
 
   const getStageColor = (stage: string) => {
@@ -300,6 +319,24 @@ export default function Home() {
                                         >
                                           Copy Fix
                                         </button>
+                                        <button 
+                                           onClick={() => applyFix(finding)}
+                                           disabled={fixingUrls[finding.url || finding.url_pattern]}
+                                           className="block w-full mt-2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 px-3 py-2 rounded text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-emerald-500 hover:text-neutral-950 transition-all disabled:opacity-50"
+                                         >
+                                           {fixingUrls[finding.url || finding.url_pattern] ? "Refactoring..." : "🛡️ Apply Fix to File"}
+                                         </button>
+
+                                         {fixStatus[finding.url || finding.url_pattern] === "success" && (
+                                           <div className="mt-2 text-[10px] text-emerald-400 font-bold animate-bounce text-center uppercase tracking-tighter">
+                                              ✨ Fix Applied Successfully!
+                                           </div>
+                                         )}
+                                         {fixStatus[finding.url || finding.url_pattern] === "error" && (
+                                           <div className="mt-2 text-[10px] text-red-400 font-bold text-center uppercase tracking-tighter">
+                                              ❌ Auto-Fix Failed. Try Manual.
+                                           </div>
+                                         )}
                                      </div>
                                      <span className="text-[9px] uppercase text-emerald-500/70 font-bold tracking-tighter block mb-3">Safe Code Snippet</span>
                                      <pre className="text-xs font-mono text-emerald-50 overflow-x-auto scrollbar-thin scrollbar-thumb-emerald-900/50">

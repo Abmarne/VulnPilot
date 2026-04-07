@@ -101,6 +101,21 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Execute the scan (Headless or UI-driven, logic is the same)
                 await engine.run()
                 
+            elif request_data.get("type") == "APPLY_FIX":
+                finding = request_data.get("finding")
+                target = request_data.get("target")
+                if finding and target:
+                    engine = ScannerEngine(
+                        target=target,
+                        on_log=lambda text, stage: emit_log(websocket, text, stage)
+                    )
+                    success = await engine.apply_remediation(finding)
+                    await manager.send_personal_message({
+                        "type": "fix_status",
+                        "success": success,
+                        "url": finding.get("url") or finding.get("url_pattern")
+                    }, websocket)
+
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:

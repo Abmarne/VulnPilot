@@ -24,6 +24,7 @@ async def run_cli():
     parser.add_argument("--output", default="vulnpilot_report.md", help="Output file for the security report")
     parser.add_argument("--fail-on", default="High", choices=["Low", "Medium", "High", "Critical"], 
                         help="Exit with code 1 if findings of this severity or higher are found")
+    parser.add_argument("--apply-fix", action="store_true", help="Automatically apply secure code fixes to the local codebase")
     
     args = parser.parse_args()
 
