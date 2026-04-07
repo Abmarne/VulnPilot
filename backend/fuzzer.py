@@ -56,10 +56,18 @@ class Fuzzer:
         for param_name in params:
             # Check for guided insights for this parameter
             relevant_insights = [i for i in self.guided_insights if i.get("param") == param_name]
-            target_payloads = self.payloads
+            target_payloads = list(self.payloads)
+            
             if relevant_insights:
                 vuln_type = relevant_insights[0].get("vulnerability_type", "unknown")
-                target_payloads = self._get_specialized_payloads(vuln_type)
+                # Add specialized static payloads
+                target_payloads.extend(self._get_specialized_payloads(vuln_type))
+                
+                # Fetch AI-driven BESPOKE payloads for this specific context
+                print(f"[*] Generating Bespoke AI payloads for {vuln_type} on {param_name}...")
+                bespoke = llm.generate_bespoke_payloads(relevant_insights[0])
+                if bespoke:
+                    target_payloads.extend(bespoke)
 
             for payload in target_payloads:
                 modified_params = params.copy()
@@ -91,10 +99,17 @@ class Fuzzer:
             target_url = f"{url}{separator}vulnpilot_test={payload}"
             self._submit_and_check(target_url, "GET", None, payload, results)
             
-        # 4. Inject into Common Headers
-        headers_to_fuzz = ["User-Agent", "Referer", "X-Forwarded-For", "X-Api-Key"]
+        # 4. Inject into Common Headers (Including SSRF bypasses)
+        headers_to_fuzz = ["User-Agent", "Referer", "X-Forwarded-For", "X-Api-Key", "X-Forwarded-Host"]
+        advanced_payloads = [
+            "http://169.254.169.254/latest/meta-data/",
+            "http://localhost:80",
+            "http://127.0.0.1:22",
+            "metadata.google.internal"
+        ]
+        
         for header in headers_to_fuzz:
-            for payload in self.payloads:
+            for payload in (self.payloads + advanced_payloads):
                 current_headers = self.session.headers.copy()
                 current_headers.update({header: payload})
                 self._submit_and_check(url, "GET", None, f"Header {header}: {payload}", results, headers=current_headers)

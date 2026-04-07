@@ -165,13 +165,13 @@ export default function Home() {
                 </h3>
                 
                 <div className="space-y-4">
-                  {["init", "recon", "sast", "fuzzing", "analysis"].map((s) => (
+                  {["init", "recon", "sca", "sast", "logic", "fuzzing", "analysis"].map((s, idx) => (
                     <div key={s} className="flex items-center gap-4">
                       <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-[10px] font-bold transition-all duration-500 ${getStageColor(s)}`}>
-                        {s === "init" ? "1" : s === "recon" ? "2" : s === "sast" ? "3" : s === "fuzzing" ? "4" : "5"}
+                        {idx + 1}
                       </div>
                       <div className="flex-1">
-                        <div className="text-[10px] uppercase font-bold tracking-wider text-neutral-400">{s}</div>
+                        <div className="text-[10px] uppercase font-bold tracking-wider text-neutral-400">{s === "sca" ? "SCA / Deps" : s === "logic" ? "Logic Audit" : s}</div>
                         <div className="h-1 w-full bg-neutral-950 rounded-full mt-1 overflow-hidden">
                           <div 
                             className="h-full bg-emerald-500 transition-all duration-1000 ease-out"
@@ -349,7 +349,7 @@ export default function Home() {
                         )}
                     </div>
                 );
-            })}
+              })}
           </div>
         )}
       </div>

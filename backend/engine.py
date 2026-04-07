@@ -6,6 +6,9 @@ from fuzzer import Fuzzer
 import llm
 from sast_engine import SastEngine
 from header_analyzer import analyze_headers
+from dependency_scanner import DependencyScanner
+from logic_auditor import LogicAuditor
+import os
 
 class ScannerEngine:
     def __init__(
@@ -132,26 +135,6 @@ class ScannerEngine:
                             elif verdict.get("verdict") == "Verified":
                                 await self._emit_log(f"  [!] Logic Check: PROVEN VULNERABLE for {sink['url_pattern']}", "sast")
             sast.cleanup()
-        
-        await self._emit_progress("fuzzing", 50)
-        
-        # 3. Hybrid Fuzzing (Guided DAST)
-        raw_anomalies = []
-        if endpoints:
-            await self._emit_log(f"[*] Fuzzing: Launching guided assault on {len(endpoints)} targets...", "fuzzing")
-            fuzzer = Fuzzer(endpoints, self.session_cookie, guided_insights=guided_insights)
-            raw_anomalies = fuzzer.run_fuzzer(target_url)
-            await self._emit_log(f"[*] Fuzzing: Detected {len(raw_anomalies)} raw anomalies.", "fuzzing")
-        
-        await self._emit_progress("analysis", 80)
-        
-        # 4. Built-in Header Analysis
-        if target_url:
-            await self._emit_log("[*] Analyzing security headers...", "analysis")
-            header_findings = analyze_headers(target_url)
-            for hf in header_findings:
-                await self._emit_finding(hf)
-        
         # 5. Final LLM Analysis
         await self._emit_log("[*] Finalizing Hybrid Analysis with Gemini...", "analysis")
         llm_findings = llm.analyze_hybrid(raw_anomalies, code_context)

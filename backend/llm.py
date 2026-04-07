@@ -280,6 +280,37 @@ def deep_taint_audit(vulnerability_chain: Dict[str, Any], extra_context: str) ->
     return {}
 
 
+def generate_bespoke_payloads(sink_context: Dict[str, Any]) -> List[str]:
+    """Uses LLM to generate custom bypass payloads for a specific code logic."""
+    if not sink_context:
+        return []
+
+    prompt = f"""
+    --- CONTEXT ---
+    Vulnerability Type: {sink_context.get('vulnerability_type')}
+    Sensitive Sink: {sink_context.get('url_pattern')}
+    Target Parameter: {sink_context.get('param')}
+    Detected Logic Snippet:
+    {sink_context.get('explanation')}
+
+    --- TASK ---
+    Generate 5-7 HIGHLY SPECIFIC security bypass payloads designed to target this exact logic.
+    - If there is sanitization (like mysqli_real_escape_string or strip_tags), try to bypass it.
+    - If it's an API, try format-based attacks (JSON, YAML, XML).
+    - If it's a command injection, try various shell bypass techniques.
+    
+    Return ONLY a JSON list of strings. No explanation.
+    """
+
+    try:
+        response = model.generate_content(prompt)
+        text = response.text.replace("```json", "").replace("```", "").strip()
+        payloads = json.loads(text)
+        return payloads if isinstance(payloads, list) else []
+    except:
+        return []
+
+
 def get_refactored_file(original_code: str, vulnerability_details: Dict[str, Any]) -> str:
     """Uses LLM to refactor an entire source file to fix a specific security bug."""
     if not original_code:

@@ -11,6 +11,7 @@ import llm
 from sast_engine import SastEngine
 from header_analyzer import analyze_headers
 from engine import ScannerEngine
+import os
 
 app = FastAPI(title="VulnPilot Backend", description="Hybrid DAST+SAST Orchestrator")
 
@@ -42,8 +43,7 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
+        self.active_connections.remove(websocket)
 
     async def send_personal_message(self, message: dict, websocket: WebSocket):
         await websocket.send_json(message)

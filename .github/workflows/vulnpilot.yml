@@ -9,6 +9,9 @@ on:
 jobs:
   vulnpilot-scan:
     runs-on: ubuntu-latest
+    env:
+      GOOGLE_API_KEY: "${{ secrets.GOOGLE_API_KEY }}"
+      GROQ_API_KEY: "${{ secrets.GROQ_API_KEY }}"
 
     steps:
     - name: 📥 Checkout Code
@@ -24,10 +27,14 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r backend/requirements.txt
 
+    - name: 🔍 Pre-Scan Validation
+      run: |
+        if [ -z "$GOOGLE_API_KEY" ] && [ -z "$GROQ_API_KEY" ]; then
+          echo "::error::Both GOOGLE_API_KEY and GROQ_API_KEY are missing from secrets. Please add at least one to enable the AI engine."
+          exit 1
+        fi
+
     - name: 🚀 Run VulnPilot Headless Scan
-      env:
-        GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       run: |
         # Scan the current repository (./) and fail if HIGH severity found
         python backend/cli.py --target "./" --fail-on "High" --output "vuln_report.md"

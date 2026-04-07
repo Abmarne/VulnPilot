@@ -7,3 +7,5 @@ groq
 beautifulsoup4
 pydantic
 aiohttp
+websockets
+markdown
