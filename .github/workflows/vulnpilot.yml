@@ -34,12 +34,15 @@ jobs:
 
     - name: 📄 Post Security Report as PR Comment
       if: github.event_name == 'pull_request'
-      uses: scacap/action-status-embed@v1
+      uses: thollander/actions-comment-pull-request@v2
       with:
-        status: ${{ job.status }}
-        text: "VulnPilot found security issues! Check the attached report."
-      # Note: For real PR comments, you'd use a generic "comment-on-pr" action
-      # or simply 'cat vuln_report.md' into the summary.
+        filePath: vuln_report.md
+        comment_tag: security_report
+
+    - name: 📊 Summary Reporting
+      run: |
+        echo "## 🛡️ VulnPilot Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+        cat vuln_report.md >> $GITHUB_STEP_SUMMARY
 
     - name: 📤 Upload Scan Results
       uses: actions/upload-artifact@v3
