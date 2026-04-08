@@ -10,3 +10,4 @@ aiohttp
 websockets
 markdown
 sqlalchemy
+python-multipart

@@ -1,7 +1,8 @@
 import os
 import json
 import time
-from typing import List, Dict, Any
+import re
+from typing import List, Dict, Any, Optional, cast
 from dotenv import load_dotenv
 
 try:
@@ -22,12 +23,12 @@ GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")
 GEMINI_API_KEY  = os.environ.get("GOOGLE_API_KEY", "")
 
 # Initialize Gemini Client (New SDK)
-gemini_client = None
+gemini_client: Optional[Any] = None
 if GEMINI_API_KEY and genai is not None:
     gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Initialize Groq if available
-groq_client = None
+groq_client: Optional[Any] = None
 if GROQ_API_KEY and GROQ_API_KEY != "PASTE_YOUR_GROQ_KEY_HERE" and Groq is not None:
     groq_client = Groq(api_key=GROQ_API_KEY)
 
@@ -42,7 +43,7 @@ def _call_llm(prompt: str) -> str:
                 model="gemini-2.0-flash",
                 contents=prompt
             )
-            return response.text
+            return response.text or ""
         except Exception as e:
             print(f"[!] Gemini failed: {e}")
     else:
@@ -58,7 +59,7 @@ def _call_llm(prompt: str) -> str:
                 temperature=0.2,
                 max_tokens=4096,
             )
-            return response.choices[0].message.content
+            return response.choices[0].message.content or ""
         except Exception as ge:
             print(f"[!!] Groq fallback also failed: {ge}")
     else:
@@ -71,9 +72,8 @@ _call_gemini = _call_llm
 
 
 
-def _parse_gemini_json(text: str) -> list:
+def _parse_gemini_json(text: str) -> List[Any]:
     """Cleans and parses Gemini JSON output reliably, handling escaping issues."""
-    import re
     text = text.strip()
     # Remove markdown code blocks
     text = re.sub(r'^```(?:json)?', '', text)
@@ -100,7 +100,7 @@ def _parse_gemini_json(text: str) -> list:
                 if start != -1 and end > start:
                     try:
                         parsed = json.loads(text[start:end], strict=False)
-                    except:
+                    except json.JSONDecodeError:
                         return []
                 else:
                     # Maybe it's a single object?
@@ -109,7 +109,7 @@ def _parse_gemini_json(text: str) -> list:
                     if start != -1 and end > start:
                         try:
                             parsed = json.loads(text[start:end], strict=False)
-                        except:
+                        except json.JSONDecodeError:
                             return []
                     else:
                         return []
@@ -117,7 +117,7 @@ def _parse_gemini_json(text: str) -> list:
     if isinstance(parsed, dict):
         return [parsed]
     if isinstance(parsed, list):
-        return parsed
+        return cast(List[Any], parsed)
     return []
 
 
@@ -155,19 +155,8 @@ def generate_fuzzing_payloads(target_urls: List[str]) -> List[str]:
         text = _call_llm(prompt)
         # Use our safe parser which handles markdown and cleaning
         raw_payloads = _parse_gemini_json(text)
-        
-        # Ensure we only return a list of strings to avoid type-mismatch crashes in the fuzzer
-        clean_payloads = []
-        for p in raw_payloads:
-            if isinstance(p, str):
-                clean_payloads.append(p)
-            elif isinstance(p, dict):
-                # If LLM returned a list of dicts, try to extract the likely payload field
-                val = next(iter(p.values()), str(p))
-                clean_payloads.append(str(val))
-            else:
-                clean_payloads.append(str(p))
-        
+        clean_payloads = _normalize_string_list(raw_payloads)
+
         if clean_payloads:
             return clean_payloads
             
@@ -218,7 +207,7 @@ def identify_sinks(code_context: str) -> List[Dict[str, Any]]:
         print("[*] Identifying potential sinks in source code with LLM...")
         text = _call_llm(prompt)
         sinks = _parse_gemini_json(text)
-        return sinks if isinstance(sinks, list) else []
+        return [sink for sink in sinks if isinstance(sink, dict)]
     except Exception as e:
         print(f"[!] Sink identification failed: {e}")
         return []
@@ -256,7 +245,7 @@ def reconstruct_api_schema(js_content: str) -> List[Dict[str, Any]]:
         print("[*] Reconstructing API surface from JavaScript with LLM...")
         text = _call_llm(prompt)
         endpoints = _parse_gemini_json(text)
-        return endpoints if isinstance(endpoints, list) else []
+        return [endpoint for endpoint in endpoints if isinstance(endpoint, dict)]
     except Exception as e:
         print(f"[!] API reconstruction failed: {e}")
         return []

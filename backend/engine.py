@@ -1,10 +1,12 @@
-from typing import List, Dict, Any, Optional, Callable, Awaitable
+from typing import Any, Awaitable, Callable, Dict, List, Optional
+from urllib.parse import urlparse
 
 from crawler import ReconCrawler
 from dependency_scanner import DependencyScanner
 from fuzzer import Fuzzer
 from header_analyzer import analyze_headers
 from logic_auditor import LogicAuditor
+from profile_store import get_profile
 from sast_engine import SastEngine
 import llm
 
@@ -14,12 +16,16 @@ class ScannerEngine:
         self,
         target: str,
         session_cookie: Optional[str] = None,
+        profile_id: Optional[int] = None,
+        use_profile_requests: bool = False,
         on_log: Optional[Callable[[str, str], Awaitable[None]]] = None,
         on_progress: Optional[Callable[[str, int], Awaitable[None]]] = None,
         on_finding: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ):
         self.target = target
         self.session_cookie = session_cookie
+        self.profile_id = profile_id
+        self.use_profile_requests = use_profile_requests
         self.on_log = on_log
         self.on_progress = on_progress
         self.on_finding = on_finding
@@ -40,8 +46,47 @@ class ScannerEngine:
         if self.on_finding:
             await self.on_finding(finding)
 
+    def _request_signature(self, target: Dict[str, Any]) -> str:
+        parsed = urlparse(target.get("url", ""))
+        query_keys = sorted((target.get("query_params") or {}).keys())
+        form_keys = sorted(target.get("form_fields") or [])
+        json_keys = sorted(target.get("json_fields") or [])
+        key_blob = ",".join(query_keys + form_keys + json_keys)
+        return f"{target.get('method', 'GET').upper()}|{parsed.scheme}://{parsed.netloc}{parsed.path}|{key_blob}"
+
+    def _merge_targets(self, profile_targets: List[Dict[str, Any]], crawler_targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        merged: List[Dict[str, Any]] = []
+        seen = set()
+
+        for target in profile_targets + crawler_targets:
+            signature = self._request_signature(target)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            merged.append(target)
+        return merged
+
+    def _profile_request_to_target(self, profile: Dict[str, Any], request: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "url": request.get("url", ""),
+            "method": request.get("method", "GET"),
+            "params": list((request.get("query_json") or {}).keys()),
+            "form_fields": request.get("form_fields", []),
+            "json_fields": request.get("json_fields", []),
+            "query_params": request.get("query_json", {}),
+            "headers": request.get("headers_json", {}),
+            "cookies_json": request.get("cookies_json", {}),
+            "body_text": request.get("body_text", ""),
+            "body_type": request.get("body_type", "none"),
+            "request_name": request.get("request_name", ""),
+            "fuzzable": request.get("fuzzable", True),
+            "source": profile.get("source_type", "profile"),
+            "profile_id": profile.get("id"),
+            "profile_request_id": request.get("id"),
+        }
+
     async def run(self):
-        """Main orchestration loop: Recon -> SCA -> SAST -> Logic -> DAST -> Analysis."""
+        """Main orchestration loop: Profile -> Recon -> SCA -> SAST -> Logic -> DAST -> Analysis."""
         await self._emit_log("--- [ SCAN INITIATED ] ---", "init")
         await self._emit_progress("init", 5)
 
@@ -66,18 +111,39 @@ class ScannerEngine:
                 codebase_path = raw_target
                 await self._emit_log(f"[*] Detected Local Code: {codebase_path}", "init")
 
-        await self._emit_progress("recon", 10)
+        await self._emit_progress("profile", 10)
 
-        endpoints: List[Dict[str, Any]] = []
+        imported_targets: List[Dict[str, Any]] = []
+        if self.use_profile_requests and self.profile_id:
+            profile = get_profile(self.profile_id)
+            if profile:
+                if not target_url:
+                    target_url = profile.get("target")
+                imported_targets = [
+                    self._profile_request_to_target(profile, request)
+                    for request in profile.get("requests", [])
+                ]
+                await self._emit_log(
+                    f"[*] Profile: Loaded {len(imported_targets)} authenticated request(s) from profile '{profile.get('name')}'.",
+                    "profile",
+                )
+            else:
+                await self._emit_log(f"[!] Profile: Requested profile {self.profile_id} was not found.", "profile")
+        else:
+            await self._emit_log("[*] Profile: No authenticated request profile selected.", "profile")
+
+        await self._emit_progress("recon", 18)
+
+        crawler_targets: List[Dict[str, Any]] = []
         if target_url:
             await self._emit_log(f"[*] Recon: Crawling {target_url}...", "recon")
             crawler = ReconCrawler(target_url, self.session_cookie)
             discovery_data = crawler.map_surface()
-            endpoints = discovery_data.get("endpoints", [])
+            crawler_targets = discovery_data.get("endpoints", [])
             js_urls = discovery_data.get("js_urls", [])
 
             await self._emit_log(
-                f"[*] Recon: Found {len(endpoints)} surface endpoints and {len(js_urls)} scripts.",
+                f"[*] Recon: Found {len(crawler_targets)} surface endpoints and {len(js_urls)} scripts.",
                 "recon",
             )
 
@@ -96,13 +162,8 @@ class ScannerEngine:
                             continue
                         if endpoint_url.startswith("/"):
                             endpoint["url"] = target_url.rstrip("/") + endpoint_url
-                        if not any(existing.get("url") == endpoint.get("url") for existing in endpoints):
-                            endpoints.append(endpoint)
-                            ghost_count += 1
-                            await self._emit_log(
-                                f"  [+] GHOST ENDPOINT: {endpoint.get('method', 'GET')} {endpoint.get('url')}",
-                                "recon",
-                            )
+                        crawler_targets.append(endpoint)
+                        ghost_count += 1
                 if ghost_count > 0:
                     await self._emit_log(
                         f"[*] Recon: Added {ghost_count} hidden 'Ghost Endpoints' to attack surface.",
@@ -113,14 +174,21 @@ class ScannerEngine:
             for finding in analyze_headers(target_url):
                 await self._emit_finding(finding)
 
-        await self._emit_progress("sca", 20)
+        endpoints = self._merge_targets(imported_targets, crawler_targets)
+        if imported_targets:
+            await self._emit_log(
+                f"[*] Profile: Merged authenticated profile requests with crawler surface for {len(endpoints)} total targets.",
+                "profile",
+            )
+
+        await self._emit_progress("sca", 28)
 
         if codebase_path:
             await self._emit_log("[*] SCA: Scanning dependency manifests...", "sca")
             for finding in DependencyScanner(codebase_path).scan():
                 await self._emit_finding(finding)
 
-        await self._emit_progress("sast", 30)
+        await self._emit_progress("sast", 40)
 
         code_context = ""
         guided_insights: List[Dict[str, Any]] = []
@@ -132,10 +200,7 @@ class ScannerEngine:
                 code_context = sast.extract_critical_files()
                 await self._emit_log("[*] SAST: Running AI Sink Analysis...", "sast")
                 guided_insights = llm.identify_sinks(code_context)
-                await self._emit_log(
-                    f"[*] SAST: Found {len(guided_insights)} potential code sinks.",
-                    "sast",
-                )
+                await self._emit_log(f"[*] SAST: Found {len(guided_insights)} potential code sinks.", "sast")
 
                 for sink in guided_insights:
                     deps = sink.get("required_context", [])
@@ -170,23 +235,23 @@ class ScannerEngine:
                                 )
             sast.cleanup()
 
-        await self._emit_progress("logic", 50)
+        await self._emit_progress("logic", 55)
 
         if target_url and endpoints:
             await self._emit_log("[*] Logic: Auditing discovered routes for access-control flaws...", "logic")
             for finding in LogicAuditor(endpoints, self.session_cookie).run_audit():
                 await self._emit_finding(finding)
 
-        await self._emit_progress("dast", 60)
+        await self._emit_progress("dast", 70)
 
         raw_anomalies: List[Dict[str, Any]] = []
-        if target_url:
+        if target_url and endpoints:
             await self._emit_log(f"[*] DAST: Starting fuzzer against {target_url}...", "dast")
             fuzzer = Fuzzer(endpoints, self.session_cookie, guided_insights)
             raw_anomalies = fuzzer.run_fuzzer(base_url=target_url)
             await self._emit_log(f"[*] DAST: Fuzzer found {len(raw_anomalies)} anomalies.", "dast")
 
-        await self._emit_progress("analysis", 80)
+        await self._emit_progress("analysis", 85)
 
         await self._emit_log("[*] Finalizing Hybrid Analysis with Gemini...", "analysis")
         for finding in llm.analyze_hybrid(raw_anomalies, code_context):

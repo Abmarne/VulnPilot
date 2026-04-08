@@ -1,356 +1,391 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+
+const API_BASE = "http://localhost:8000";
+const WS_URL = "ws://localhost:8000/api/scan/ws";
+
+type LogEntry = { message: string; stage: string };
+type ProgressState = { stage: string; percent: number };
+type ProfileSummary = {
+  id: number;
+  name: string;
+  target: string;
+  source_type: string;
+  request_count: number;
+};
+type EvidenceRequest = {
+  method?: string;
+  url?: string;
+  params?: Record<string, string>;
+  headers?: Record<string, string>;
+  body?: unknown;
+};
+type Finding = {
+  vulnerability_type?: string;
+  severity?: string;
+  explanation?: string;
+  url?: string;
+  url_pattern?: string;
+  file_path?: string;
+  manual_poc?: string;
+  poc_script?: string;
+  remediation_code?: string;
+  remediation_steps?: string;
+  is_verified?: boolean;
+  evidence?: {
+    source?: string;
+    baseline_request?: EvidenceRequest;
+    mutated_request?: EvidenceRequest;
+    baseline_status?: number | string | null;
+    mutated_status?: number | string | null;
+    delta_reason?: string;
+    replay_curl?: string;
+  };
+};
 
 export default function Home() {
   const [target, setTarget] = useState("");
   const [sessionCookie, setSessionCookie] = useState("");
   const [loading, setLoading] = useState(false);
-  const [findings, setFindings] = useState<any[]>([]);
-  const [logs, setLogs] = useState<{ message: string; stage: string }[]>([]);
-  const [progress, setProgress] = useState({ stage: "init", percent: 0 });
+  const [findings, setFindings] = useState<Finding[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [progress, setProgress] = useState<ProgressState>({ stage: "init", percent: 0 });
   const [errorInfo, setErrorInfo] = useState<string | null>(null);
+  const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState("");
+  const [useProfileRequests, setUseProfileRequests] = useState(true);
+  const [harFile, setHarFile] = useState<File | null>(null);
+  const [curlCommand, setCurlCommand] = useState("");
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const [fixingUrls, setFixingUrls] = useState<Record<string, boolean>>({});
   const [fixStatus, setFixStatus] = useState<Record<string, "success" | "error" | null>>({});
-  
+
   const ws = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
+  const stages = useMemo(() => ["init", "profile", "recon", "sca", "sast", "logic", "dast", "analysis", "complete"], []);
 
   useEffect(() => {
-    if (terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
+    terminalEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
 
-  const startScan = (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (!target.trim()) {
+      setProfiles([]);
+      setSelectedProfileId("");
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/profiles?target=${encodeURIComponent(target.trim())}`);
+        const data = (await response.json()) as { profiles: ProfileSummary[] };
+        setProfiles(data.profiles || []);
+      } catch {
+        setProfiles([]);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [target]);
+
+  const stageClass = (stage: string) => {
+    const current = stages.indexOf(progress.stage);
+    const idx = stages.indexOf(stage);
+    if (idx < current || progress.stage === "complete") return "border-emerald-400 bg-emerald-500 text-neutral-950";
+    if (idx === current) return "border-emerald-500 text-emerald-400";
+    return "border-neutral-800 text-neutral-500";
+  };
+
+  const refreshProfiles = async () => {
+    if (!target.trim()) return;
+    const response = await fetch(`${API_BASE}/api/profiles?target=${encodeURIComponent(target.trim())}`);
+    const data = (await response.json()) as { profiles: ProfileSummary[] };
+    setProfiles(data.profiles || []);
+    if ((data.profiles || []).length > 0) setSelectedProfileId(String(data.profiles[0].id));
+  };
+
+  const startScan = (event: FormEvent) => {
+    event.preventDefault();
     if (loading) return;
 
+    ws.current?.close();
     setLoading(true);
     setFindings([]);
     setLogs([]);
     setProgress({ stage: "init", percent: 0 });
     setErrorInfo(null);
 
-    // Initialize WebSocket
-    const socket = new WebSocket("ws://localhost:8000/api/scan/ws");
+    const socket = new WebSocket(WS_URL);
     ws.current = socket;
 
     socket.onopen = () => {
       socket.send(JSON.stringify({
         type: "START_SCAN",
-        target: target,
-        session_cookie: sessionCookie || null
+        target,
+        session_cookie: sessionCookie || null,
+        profile_id: selectedProfileId ? Number(selectedProfileId) : null,
+        use_profile_requests: useProfileRequests && !!selectedProfileId,
       }));
     };
 
-    socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      
+    socket.onmessage = (eventMessage) => {
+      const data = JSON.parse(eventMessage.data) as { type: string; [key: string]: unknown };
       if (data.type === "log") {
-        setLogs(prev => [...prev, { message: data.message, stage: data.stage }]);
+        setLogs((prev) => [...prev, { message: String(data.message || ""), stage: String(data.stage || "") }]);
       } else if (data.type === "progress") {
-        setProgress({ stage: data.stage, percent: data.percent });
+        const next = { stage: String(data.stage || ""), percent: Number(data.percent || 0) };
+        setProgress(next);
+        if (next.stage === "complete") setLoading(false);
       } else if (data.type === "finding") {
-        setFindings(prev => [...prev, data.data]);
+        setFindings((prev) => [...prev, data.data as Finding]);
       } else if (data.type === "fix_status") {
-        setFixingUrls(prev => ({ ...prev, [data.url]: false }));
-        setFixStatus(prev => ({ ...prev, [data.url]: data.success ? "success" : "error" }));
-        setTimeout(() => setFixStatus(prev => ({ ...prev, [data.url]: null })), 5000);
+        const key = String(data.url || "");
+        setFixingUrls((prev) => ({ ...prev, [key]: false }));
+        setFixStatus((prev) => ({ ...prev, [key]: data.success ? "success" : "error" }));
       }
     };
 
-    socket.onclose = () => {
-      setLoading(false);
-      setProgress(prev => ({ ...prev, percent: 100 }));
-    };
-
-    socket.onerror = (err) => {
-      console.error("WS Error:", err);
+    socket.onerror = () => {
       setErrorInfo("WebSocket connection failed. Ensure backend is running.");
       setLoading(false);
     };
+
+    socket.onclose = () => setLoading(false);
   };
 
-  const applyFix = (finding: any) => {
+  const importHar = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!harFile || !target.trim()) {
+      setImportError("Select a HAR file and target first.");
+      return;
+    }
+    try {
+      setImportError(null);
+      setImportMessage(null);
+      const formData = new FormData();
+      formData.append("file", harFile);
+      formData.append("target", target.trim());
+      formData.append("name", harFile.name.replace(/\.[^.]+$/, ""));
+      const response = await fetch(`${API_BASE}/api/profiles/import-har`, { method: "POST", body: formData });
+      const data = (await response.json()) as { detail?: string; profile?: ProfileSummary };
+      if (!response.ok) throw new Error(data.detail || "HAR import failed.");
+      setImportMessage(`Imported ${data.profile?.name || "HAR profile"}.`);
+      setHarFile(null);
+      await refreshProfiles();
+    } catch (error) {
+      setImportError((error as Error).message);
+    }
+  };
+
+  const importCurl = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!curlCommand.trim() || !target.trim()) {
+      setImportError("Paste a cURL command and target first.");
+      return;
+    }
+    try {
+      setImportError(null);
+      setImportMessage(null);
+      const response = await fetch(`${API_BASE}/api/profiles/import-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: target.trim(), curl: curlCommand.trim(), name: "Imported cURL" }),
+      });
+      const data = (await response.json()) as { detail?: string; profile?: ProfileSummary };
+      if (!response.ok) throw new Error(data.detail || "cURL import failed.");
+      setImportMessage(`Imported ${data.profile?.name || "cURL profile"}.`);
+      setCurlCommand("");
+      await refreshProfiles();
+    } catch (error) {
+      setImportError((error as Error).message);
+    }
+  };
+
+  const applyFix = (finding: Finding) => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
-    
-    const url = finding.url || finding.url_pattern;
-    setFixingUrls(prev => ({ ...prev, [url]: true }));
-    
-    ws.current.send(JSON.stringify({
-      type: "APPLY_FIX",
-      target: target,
-      finding: finding
-    }));
+    const key = finding.url || finding.url_pattern || finding.file_path || "unknown";
+    setFixingUrls((prev) => ({ ...prev, [key]: true }));
+    ws.current.send(JSON.stringify({ type: "APPLY_FIX", target, finding }));
   };
 
-  const getStageColor = (stage: string) => {
-    const stages = ["init", "recon", "sast", "fuzzing", "analysis", "complete"];
-    const currentIdx = stages.indexOf(progress.stage);
-    const stageIdx = stages.indexOf(stage);
-    
-    if (stageIdx < currentIdx || progress.stage === "complete") return "bg-emerald-500 border-emerald-400 text-neutral-950";
-    if (stageIdx === currentIdx) return "bg-emerald-500/20 border-emerald-500 text-emerald-400 animate-pulse";
-    return "bg-neutral-900 border-neutral-800 text-neutral-500";
+  const renderEvidence = (title: string, request?: EvidenceRequest) => {
+    if (!request) return null;
+    return (
+      <div className="rounded border border-neutral-800 bg-neutral-950 p-3">
+        <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-teal-400">{title}</div>
+        <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-neutral-300">{JSON.stringify(request, null, 2)}</pre>
+      </div>
+    );
   };
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-neutral-200 p-8 flex flex-col items-center font-sans tracking-wide">
-      <div className="max-w-5xl w-full mt-4">
-        {/* Header */}
-        <div className="text-center mb-10">
-          <h1 className="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-br from-emerald-400 to-teal-600 mb-4 tracking-tighter">
-            VulnPilot
-          </h1>
-          <p className="text-neutral-400 text-lg font-light tracking-wide">
-            Real-time Hybrid Context-Aware Security Analysis
-          </p>
-        </div>
+    <main className="min-h-screen bg-neutral-950 p-8 text-neutral-200">
+      <div className="mx-auto max-w-6xl space-y-8">
+        <header className="space-y-2 text-center">
+          <h1 className="text-6xl font-black tracking-tighter text-emerald-400">VulnPilot</h1>
+          <p className="text-neutral-400">Real-time hybrid security analysis with authenticated attack profiles.</p>
+        </header>
 
-        {/* Input Form */}
-        <form onSubmit={startScan} className="bg-neutral-900/50 backdrop-blur-xl border border-neutral-800 rounded-2xl p-8 shadow-2xl relative overflow-hidden mb-8">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[200%] h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-20"></div>
-          
-          <div className="space-y-6 relative z-10">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-xs font-bold mb-2 text-neutral-500 tracking-widest uppercase">Target Application</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="URL, GitHub, or Local Path"
-                  value={target}
-                  onChange={(e) => setTarget(e.target.value)}
-                  className="w-full bg-neutral-950/50 border border-neutral-800 rounded-lg px-4 py-3 text-emerald-50 focus:outline-none focus:border-emerald-500/50 transition-all font-mono text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold mb-2 text-neutral-500 tracking-widest uppercase">Auth Credentials (Cookie)</label>
-                <input
-                  type="text"
-                  placeholder="session=xyz... (Optional)"
-                  value={sessionCookie}
-                  onChange={(e) => setSessionCookie(e.target.value)}
-                  className="w-full bg-neutral-950/50 border border-neutral-800 rounded-lg px-4 py-3 text-emerald-50 focus:outline-none focus:border-emerald-500/50 transition-all font-mono text-sm"
-                />
-              </div>
-            </div>
+        <section className="grid gap-6 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6 xl:grid-cols-2">
+          <form onSubmit={importHar} className="space-y-3">
+            <h2 className="text-sm font-bold uppercase tracking-widest text-teal-400">Import HAR Profile</h2>
+            <input type="file" accept=".har,.json" onChange={(event) => setHarFile(event.target.files?.[0] || null)} className="w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm" />
+            <button type="submit" className="w-full rounded bg-teal-500 px-4 py-2 text-sm font-bold uppercase tracking-widest text-neutral-950">Import HAR</button>
+          </form>
+          <form onSubmit={importCurl} className="space-y-3">
+            <h2 className="text-sm font-bold uppercase tracking-widest text-emerald-400">Import cURL Profile</h2>
+            <textarea rows={5} value={curlCommand} onChange={(event) => setCurlCommand(event.target.value)} placeholder='curl "https://target/app" -H "Cookie: session=..."' className="w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-2 font-mono text-sm" />
+            <button type="submit" className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-bold uppercase tracking-widest text-neutral-950">Import cURL</button>
+          </form>
+          {(importMessage || importError) && <div className={`xl:col-span-2 rounded border px-4 py-3 text-sm ${importError ? "border-red-500/30 bg-red-500/10 text-red-400" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"}`}>{importError || importMessage}</div>}
+        </section>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-black tracking-widest uppercase text-sm py-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_30px_-10px_rgba(16,185,129,0.5)]"
-            >
-              {loading ? "Engaging Hybrid Engine..." : "Launch Real-time Scan"}
-            </button>
+        <form onSubmit={startScan} className="space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6">
+          <div className="grid gap-4 md:grid-cols-2">
+            <input value={target} onChange={(event) => setTarget(event.target.value)} required placeholder="Target URL, GitHub, or local path" className="rounded border border-neutral-800 bg-neutral-950 px-3 py-3 text-sm" />
+            <input value={sessionCookie} onChange={(event) => setSessionCookie(event.target.value)} placeholder="session=xyz... (optional)" className="rounded border border-neutral-800 bg-neutral-950 px-3 py-3 text-sm" />
           </div>
+          <div className="grid gap-4 md:grid-cols-[2fr,1fr]">
+            <select value={selectedProfileId} onChange={(event) => setSelectedProfileId(event.target.value)} className="rounded border border-neutral-800 bg-neutral-950 px-3 py-3 text-sm">
+              <option value="">No saved attack profile</option>
+              {profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name} ({profile.request_count} requests, {profile.source_type})
+                </option>
+              ))}
+            </select>
+            <label className="flex items-center gap-3 rounded border border-neutral-800 bg-neutral-950 px-3 py-3 text-sm">
+              <input type="checkbox" checked={useProfileRequests} onChange={(event) => setUseProfileRequests(event.target.checked)} className="accent-emerald-500" />
+              Use profile requests
+            </label>
+          </div>
+          <button type="submit" disabled={loading} className="w-full rounded bg-emerald-500 px-4 py-3 text-sm font-black uppercase tracking-widest text-neutral-950 disabled:opacity-50">
+            {loading ? "Scanning..." : "Launch Real-time Scan"}
+          </button>
+          {errorInfo && <div className="rounded border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{errorInfo}</div>}
         </form>
 
-        {errorInfo && (
-           <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl font-mono text-xs flex items-center mb-6 animate-shake">
-             <span className="mr-2">⚠️</span> {errorInfo}
-           </div>
-        )}
-
-        {/* Real-time Dashboard */}
         {(loading || logs.length > 0) && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12 animate-in fade-in zoom-in duration-500">
-            {/* Progress & Status */}
-            <div className="lg:col-span-1 space-y-6">
-              <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-                <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-widest mb-6 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                  Mission Progress
-                </h3>
-                
-                <div className="space-y-4">
-                  {["init", "recon", "sca", "sast", "logic", "fuzzing", "analysis"].map((s, idx) => (
-                    <div key={s} className="flex items-center gap-4">
-                      <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-[10px] font-bold transition-all duration-500 ${getStageColor(s)}`}>
-                        {idx + 1}
-                      </div>
-                      <div className="flex-1">
-                        <div className="text-[10px] uppercase font-bold tracking-wider text-neutral-400">{s === "sca" ? "SCA / Deps" : s === "logic" ? "Logic Audit" : s}</div>
-                        <div className="h-1 w-full bg-neutral-950 rounded-full mt-1 overflow-hidden">
-                          <div 
-                            className="h-full bg-emerald-500 transition-all duration-1000 ease-out"
-                            style={{ width: progress.stage === s ? `${progress.percent}%` : (getStageColor(s).includes("bg-emerald-500") ? "100%" : "0%") }}
-                          ></div>
-                        </div>
+          <section className="grid gap-6 lg:grid-cols-3">
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6">
+              <h3 className="mb-4 text-xs font-bold uppercase tracking-widest text-neutral-500">Mission Progress</h3>
+              <div className="space-y-3">
+                {stages.filter((stage) => stage !== "complete").map((stage, index) => (
+                  <div key={stage} className="flex items-center gap-3">
+                    <div className={`flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-bold ${stageClass(stage)}`}>{index + 1}</div>
+                    <div className="flex-1">
+                      <div className="text-[10px] uppercase tracking-widest text-neutral-400">{stage}</div>
+                      <div className="mt-1 h-1 rounded bg-neutral-950">
+                        <div className="h-1 rounded bg-emerald-500" style={{ width: progress.stage === stage ? `${progress.percent}%` : stageClass(stage).includes("bg-emerald-500") ? "100%" : "0%" }} />
                       </div>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
               </div>
             </div>
-
-            {/* Live Terminal */}
-            <div className="lg:col-span-2 bg-neutral-900 border border-neutral-800 rounded-2xl shadow-xl overflow-hidden flex flex-col h-[320px]">
-              <div className="bg-neutral-950/50 border-b border-neutral-800 px-4 py-2 flex items-center justify-between">
-                <div className="flex gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-full bg-red-500/20 border border-red-500/40"></div>
-                  <div className="w-2.5 h-2.5 rounded-full bg-amber-500/20 border border-amber-500/40"></div>
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/20 border border-emerald-500/40"></div>
-                </div>
-                <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-widest">engine_output.log</span>
-              </div>
-              <div className="p-4 font-mono text-xs overflow-y-auto space-y-1 flex-1 scrollbar-thin scrollbar-thumb-neutral-800">
-                {logs.map((log, i) => (
-                  <div key={i} className="flex gap-3 animate-in slide-in-from-left-2 duration-300">
-                    <span className="text-neutral-600 shrink-0">[{new Date().toLocaleTimeString([], { hour12: false })}]</span>
-                    <span className={log.message.startsWith("[!]") ? "text-red-400" : log.message.startsWith("[*]") ? "text-emerald-400" : "text-neutral-400"}>
-                      {log.message}
-                    </span>
+            <div className="lg:col-span-2 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-4">
+              <div className="mb-3 text-xs font-bold uppercase tracking-widest text-neutral-500">engine_output.log</div>
+              <div className="h-80 space-y-1 overflow-y-auto rounded border border-neutral-800 bg-neutral-950 p-3 font-mono text-xs">
+                {logs.map((log, index) => (
+                  <div key={`${log.stage}-${index}`} className={log.message.startsWith("[!]") ? "text-red-400" : log.message.startsWith("[*]") ? "text-emerald-400" : "text-neutral-300"}>
+                    [{new Date().toLocaleTimeString([], { hour12: false })}] {log.message}
                   </div>
                 ))}
                 <div ref={terminalEndRef} />
               </div>
             </div>
-          </div>
+          </section>
         )}
 
-        {/* Findings List */}
         {findings.length > 0 && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
-            <div className="flex items-center justify-between mb-4 border-b border-neutral-800 pb-4">
-                <h2 className="text-2xl font-bold text-emerald-400 tracking-tight">Active Finding Stream</h2>
-                <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-mono rounded-full">
-                    {findings.length} Vulnerabilities Detected
-                </div>
+          <section className="space-y-6">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
+              <h2 className="text-2xl font-bold text-emerald-400">Active Finding Stream</h2>
+              <div className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-500">{findings.length} findings</div>
             </div>
-            
-            {findings
-              .sort((a, b) => {
-                const order: Record<string, number> = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };
-                return (order[b.severity?.toLowerCase()] || 0) - (order[a.severity?.toLowerCase()] || 0);
-              })
-              .map((finding: any, idx: number) => {
-                const sev = (finding.severity || "Unknown").toLowerCase();
-                const sevColor = sev === "critical" ? "text-purple-400 bg-purple-900/30 border-purple-800" 
-                               : sev === "high" ? "text-red-400 bg-red-900/30 border-red-800"
-                               : sev === "medium" ? "text-amber-400 bg-amber-900/30 border-amber-800"
-                               : "text-blue-400 bg-blue-900/30 border-blue-800";
-                               
-                return (
-                    <div key={idx} className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 relative overflow-hidden shadow-xl hover:border-neutral-700 transition-all hover:translate-x-1 duration-300 group">
-                        <div className={`absolute top-0 left-0 w-1 h-full ${sev === 'critical' ? 'bg-purple-500' : sev === 'high' ? 'bg-red-500' : 'bg-emerald-500'}`}></div>
-                        
-                        <div className="flex justify-between items-start mb-4">
-                          <div className="flex flex-col gap-1">
-                            <h3 className="text-xl font-bold text-white">{finding.vulnerability_type}</h3>
-                            {finding.is_verified && (
-                              <div className="flex items-center gap-1.5 text-[10px] font-black text-emerald-400 uppercase tracking-tighter bg-emerald-400/10 border border-emerald-400/20 px-2 py-0.5 rounded-md w-fit animate-pulse">
-                                <span className="text-xs">🛡️</span> Verified Proof
-                              </div>
-                            )}
-                          </div>
-                          <span className={`px-2 py-1 rounded border text-[10px] font-bold uppercase tracking-widest ${sevColor}`}>
-                            {finding.severity || "Unknown"}
-                          </span>
-                        </div>
-                        
-                        <div className="mb-6 space-y-4">
-                            <div>
-                              <h4 className="text-[10px] uppercase font-bold text-neutral-500 mb-1 tracking-widest">Location / Sink</h4>
-                              <p className="text-emerald-500 font-mono text-xs bg-emerald-950/30 p-2 rounded border border-emerald-900/20">
-                                {finding.url || finding.file_path || "General Surface"}
-                              </p>
-                            </div>
-                            <div>
-                              <h4 className="text-[10px] uppercase font-bold text-neutral-500 mb-1 tracking-widest">Intelligence Commentary</h4>
-                              <p className="text-neutral-400 text-sm leading-relaxed">{finding.explanation}</p>
-                            </div>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="bg-neutral-950 p-4 rounded-lg border border-neutral-800 shadow-inner">
-                              <span className="text-[10px] uppercase text-emerald-500 font-bold tracking-widest mb-2 block">Manual Validation</span>
-                              <p className="text-xs font-mono text-neutral-300 whitespace-pre-wrap">{finding.manual_poc}</p>
-                          </div>
-
-                          {finding.poc_script && (
-                            <div className="bg-neutral-950 p-4 rounded-lg border border-neutral-800 shadow-inner relative overflow-hidden">
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className="text-[10px] uppercase text-teal-400 font-bold tracking-widest">Auto-PoC script</span>
-                                    <button 
-                                        onClick={() => navigator.clipboard.writeText(finding.poc_script)}
-                                        className="text-[9px] text-neutral-500 hover:text-teal-400 transition-all uppercase font-bold tracking-widest bg-neutral-900 px-2 py-1 rounded border border-neutral-800"
-                                    >
-                                        Copy
-                                    </button>
-                                </div>
-                                <pre className="text-[11px] font-mono text-neutral-300 overflow-x-auto p-2 bg-neutral-900/50 rounded border border-emerald-900/10">
-                                    <code>{finding.poc_script}</code>
-                                </pre>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* New Remediation Section */}
-                        {(finding.remediation_code || finding.remediation_steps) && (
-                          <div className="mt-8 pt-6 border-t border-neutral-800/50 animate-in slide-in-from-top-4 duration-500">
-                             <h4 className="text-[10px] uppercase font-bold text-emerald-400 mb-4 tracking-widest flex items-center gap-2">
-                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
-                               🛡️ Secure Implementation & Remediation
-                             </h4>
-                             
-                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                               {/* Steps / Plan */}
-                               <div className="md:col-span-1 space-y-3">
-                                  <span className="text-[9px] uppercase text-neutral-500 font-bold tracking-tighter block mb-2">Resolution Plan</span>
-                                  <div className="text-xs text-neutral-300 space-y-2 font-light">
-                                    {finding.remediation_steps?.split('\n').map((step: string, i: number) => (
-                                      <div key={i} className="flex gap-2 leading-relaxed">
-                                        <span className="text-emerald-500 font-bold shrink-0">{i + 1}.</span>
-                                        <p>{step.trim().replace(/^\d+\.\s*/, '')}</p>
-                                      </div>
-                                    ))}
-                                  </div>
-                               </div>
-
-                               {/* Secure Code */}
-                               <div className="md:col-span-2">
-                                  <div className="bg-emerald-950/20 rounded-xl border border-emerald-500/20 p-5 relative group overflow-hidden">
-                                     <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button 
-                                          onClick={() => navigator.clipboard.writeText(finding.remediation_code)}
-                                          className="bg-emerald-500 text-neutral-950 px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-emerald-400 transition-all"
-                                        >
-                                          Copy Fix
-                                        </button>
-                                        <button 
-                                           onClick={() => applyFix(finding)}
-                                           disabled={fixingUrls[finding.url || finding.url_pattern]}
-                                           className="block w-full mt-2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 px-3 py-2 rounded text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-emerald-500 hover:text-neutral-950 transition-all disabled:opacity-50"
-                                         >
-                                           {fixingUrls[finding.url || finding.url_pattern] ? "Refactoring..." : "🛡️ Apply Fix to File"}
-                                         </button>
-
-                                         {fixStatus[finding.url || finding.url_pattern] === "success" && (
-                                           <div className="mt-2 text-[10px] text-emerald-400 font-bold animate-bounce text-center uppercase tracking-tighter">
-                                              ✨ Fix Applied Successfully!
-                                           </div>
-                                         )}
-                                         {fixStatus[finding.url || finding.url_pattern] === "error" && (
-                                           <div className="mt-2 text-[10px] text-red-400 font-bold text-center uppercase tracking-tighter">
-                                              ❌ Auto-Fix Failed. Try Manual.
-                                           </div>
-                                         )}
-                                     </div>
-                                     <span className="text-[9px] uppercase text-emerald-500/70 font-bold tracking-tighter block mb-3">Safe Code Snippet</span>
-                                     <pre className="text-xs font-mono text-emerald-50 overflow-x-auto scrollbar-thin scrollbar-thumb-emerald-900/50">
-                                       <code>{finding.remediation_code}</code>
-                                     </pre>
-                                  </div>
-                               </div>
-                             </div>
-                          </div>
-                        )}
+            {[...findings].sort((left, right) => {
+              const order: Record<string, number> = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };
+              return (order[(right.severity || "").toLowerCase()] || 0) - (order[(left.severity || "").toLowerCase()] || 0);
+            }).map((finding, index) => {
+              const key = finding.url || finding.url_pattern || finding.file_path || `finding-${index}`;
+              return (
+                <article key={key + index} className="space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-xl font-bold text-white">{finding.vulnerability_type || "Untitled Finding"}</h3>
+                      {finding.is_verified && <div className="mt-2 w-fit rounded border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-emerald-400">Verified Proof</div>}
                     </div>
-                );
-              })}
-          </div>
+                    <div className="rounded border border-neutral-700 px-2 py-1 text-xs uppercase tracking-widest text-neutral-300">{finding.severity || "Unknown"}</div>
+                  </div>
+                  <div className="rounded border border-emerald-900/30 bg-emerald-950/20 p-3 font-mono text-xs text-emerald-400">{finding.url || finding.file_path || finding.url_pattern || "General Surface"}</div>
+                  <p className="text-sm leading-relaxed text-neutral-300">{finding.explanation}</p>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded border border-neutral-800 bg-neutral-950 p-3">
+                      <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-emerald-400">Manual Validation</div>
+                      <p className="whitespace-pre-wrap text-xs text-neutral-300">{finding.manual_poc}</p>
+                    </div>
+                    {finding.poc_script && (
+                      <div className="rounded border border-neutral-800 bg-neutral-950 p-3">
+                        <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-teal-400">
+                          <span>Auto-PoC Script</span>
+                          <button onClick={() => navigator.clipboard.writeText(finding.poc_script || "")} className="rounded border border-neutral-800 px-2 py-1 text-[9px] text-neutral-400">Copy</button>
+                        </div>
+                        <pre className="overflow-x-auto text-[11px] text-neutral-300">{finding.poc_script}</pre>
+                      </div>
+                    )}
+                  </div>
+                  {finding.evidence && (
+                    <div className="space-y-4 border-t border-neutral-800 pt-4">
+                      <div className="flex items-center justify-between">
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-teal-400">Replayable Evidence</div>
+                        <div className="text-[10px] uppercase tracking-widest text-neutral-500">Source: {finding.evidence.source || "crawler"}</div>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        {renderEvidence("Baseline Request", finding.evidence.baseline_request)}
+                        {renderEvidence("Mutated Request", finding.evidence.mutated_request)}
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-[1fr,2fr]">
+                        <div className="rounded border border-neutral-800 bg-neutral-950 p-3">
+                          <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-neutral-500">Status Delta</div>
+                          <div className="text-sm text-neutral-200">
+                            {String(finding.evidence.baseline_status ?? "n/a")} {"->"} {String(finding.evidence.mutated_status ?? "n/a")}
+                          </div>
+                          <div className="mt-2 text-xs text-neutral-400">{finding.evidence.delta_reason}</div>
+                        </div>
+                        <div className="rounded border border-neutral-800 bg-neutral-950 p-3">
+                          <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+                            <span>Replay cURL</span>
+                            <button onClick={() => navigator.clipboard.writeText(finding.evidence?.replay_curl || "")} className="rounded border border-neutral-800 px-2 py-1 text-[9px] text-neutral-400">Copy</button>
+                          </div>
+                          <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-neutral-300">{finding.evidence.replay_curl}</pre>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {(finding.remediation_code || finding.remediation_steps) && (
+                    <div className="space-y-4 border-t border-neutral-800 pt-4">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">Secure Implementation & Remediation</div>
+                      <div className="grid gap-4 md:grid-cols-[1fr,2fr]">
+                        <div className="rounded border border-neutral-800 bg-neutral-950 p-3 text-xs text-neutral-300">{finding.remediation_steps}</div>
+                        <div className="rounded border border-emerald-500/20 bg-emerald-950/20 p-3">
+                          <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-emerald-400">
+                            <span>Safe Code Snippet</span>
+                            <button onClick={() => navigator.clipboard.writeText(finding.remediation_code || "")} className="rounded bg-emerald-500 px-2 py-1 text-[9px] text-neutral-950">Copy</button>
+                          </div>
+                          <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-emerald-50">{finding.remediation_code}</pre>
+                          <button onClick={() => applyFix(finding)} disabled={fixingUrls[key]} className="mt-3 rounded border border-emerald-500/40 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-emerald-400 disabled:opacity-50">
+                            {fixingUrls[key] ? "Refactoring..." : "Apply Fix to File"}
+                          </button>
+                          {fixStatus[key] === "success" && <div className="mt-2 text-[10px] font-bold uppercase tracking-widest text-emerald-400">Fix Applied Successfully</div>}
+                          {fixStatus[key] === "error" && <div className="mt-2 text-[10px] font-bold uppercase tracking-widest text-red-400">Auto-Fix Failed</div>}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </section>
         )}
       </div>
     </main>
