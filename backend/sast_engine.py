@@ -2,13 +2,14 @@ import os
 import shutil
 import tempfile
 import subprocess
+from pathlib import Path
 
 class SastEngine:
     def __init__(self, codebase_path: str):
         self.raw_path = codebase_path
         self.is_github = codebase_path.startswith("http://github.com") or codebase_path.startswith("https://github.com")
         self.temp_dir = None
-        self.target_dir = codebase_path
+        self.target_dir = os.path.abspath(codebase_path)
         
     def prepare_codebase(self) -> str:
         """Clones if github, otherwise validates local path."""
@@ -17,7 +18,7 @@ class SastEngine:
             print(f"[*] Cloning {self.raw_path} to {self.temp_dir}...")
             try:
                 subprocess.run(["git", "clone", "--depth", "1", self.raw_path, self.temp_dir], check=True, capture_output=True)
-                self.target_dir = self.temp_dir
+                self.target_dir = os.path.abspath(self.temp_dir)
             except Exception as e:
                 print(f"[!] Error cloning repository: {e}")
                 return ""
@@ -28,6 +29,19 @@ class SastEngine:
             
         print(f"[*] Codebase initialized at {self.target_dir}")
         return self.target_dir
+
+    def _resolve_path(self, rel_path: str) -> str:
+        if not self.target_dir or not rel_path:
+            return ""
+
+        root = Path(self.target_dir).resolve()
+        candidate = (root / rel_path).resolve()
+
+        try:
+            candidate.relative_to(root)
+            return str(candidate)
+        except ValueError:
+            return ""
 
     def extract_critical_files(self) -> str:
         """
@@ -90,8 +104,8 @@ class SastEngine:
         if not self.target_dir:
             return ""
         
-        file_path = os.path.join(self.target_dir, rel_path)
-        if not os.path.exists(file_path):
+        file_path = self._resolve_path(rel_path)
+        if not file_path or not os.path.exists(file_path):
             # Attempt to find it if AI didn't provide exact path
             for root, _, files in os.walk(self.target_dir):
                 for f in files:
@@ -110,7 +124,10 @@ class SastEngine:
         if not self.target_dir or not new_content:
             return False
             
-        file_path = os.path.join(self.target_dir, rel_path)
+        file_path = self._resolve_path(rel_path)
+        if not file_path:
+            print(f"[!] Refusing to write outside codebase root: {rel_path}")
+            return False
         # Final directory path check
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         

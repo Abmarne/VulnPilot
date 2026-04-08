@@ -1,24 +1,18 @@
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import json
-import asyncio
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import uvicorn
-from crawler import ReconCrawler
-from fuzzer import Fuzzer
-import llm
 from sast_engine import SastEngine
-from header_analyzer import analyze_headers
 from engine import ScannerEngine
-import os
 
 app = FastAPI(title="VulnPilot Backend", description="Hybrid DAST+SAST Orchestrator")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Local development so allow all
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -43,7 +37,8 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def send_personal_message(self, message: dict, websocket: WebSocket):
         await websocket.send_json(message)

@@ -73,20 +73,16 @@ class DependencyScanner:
         """
         
         try:
-            # We reuse the llm model logic here (assuming llm module is available)
-            import google.generativeai as genai
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content(prompt)
-            text = response.text.replace("```json", "").replace("```", "").strip()
-            vulns = json.loads(text)
+            text = llm._call_llm(prompt)
+            vulns = llm._parse_gemini_json(text)
             
             for v in vulns:
                 self.findings.append({
-                    "vulnerability_type": f"Vulnerable Dependency ({v.get('Library Name')})",
-                    "severity": v.get("Severity", "Medium"),
-                    "explanation": v.get("Explanation", ""),
+                    "vulnerability_type": f"Vulnerable Dependency ({v.get('Library Name') or v.get('library_name') or v.get('name', 'Unknown')})",
+                    "severity": v.get("Severity") or v.get("severity", "Medium"),
+                    "explanation": v.get("Explanation") or v.get("explanation", ""),
                     "url": f"Manifest: {ecosystem}",
-                    "remediation_steps": v.get("Recommendation", "Update the library to the latest secure version.")
+                    "remediation_steps": v.get("Recommendation") or v.get("recommendation", "Update the library to the latest secure version.")
                 })
         except Exception as e:
             print(f"[!] SCA AI Check failed: {e}")

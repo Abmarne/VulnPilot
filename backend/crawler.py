@@ -1,10 +1,12 @@
 import requests
 from bs4 import BeautifulSoup
 from typing import List, Optional, Dict, Any
+from urllib.parse import urljoin, urlparse
 
 class ReconCrawler:
     def __init__(self, target_url: str, session_cookie: Optional[str] = None):
         self.target_url = target_url.rstrip('/')
+        self.base_netloc = urlparse(self.target_url).netloc
         self.session = requests.Session()
         
         # Inject custom session cookie to test authenticated routes
@@ -31,11 +33,9 @@ class ReconCrawler:
                 # 1. Extract Links
                 for link in soup.find_all('a', href=True):
                     href = link['href']
-                    full_url = ""
-                    if href.startswith('/'):
-                        full_url = self.target_url + href
-                    elif href.startswith(self.target_url):
-                        full_url = href
+                    full_url = urljoin(self.target_url + "/", href)
+                    if urlparse(full_url).netloc != self.base_netloc:
+                        continue
                     
                     if full_url and full_url not in visited:
                         visited.add(full_url)
@@ -45,7 +45,9 @@ class ReconCrawler:
                 for form in soup.find_all('form', action=True):
                     action = form['action']
                     method = form.get('method', 'GET').upper()
-                    full_url = self.target_url + action if action.startswith('/') else action
+                    full_url = urljoin(self.target_url + "/", action)
+                    if urlparse(full_url).netloc != self.base_netloc:
+                        continue
                     
                     form_fields = [i.get('name') for i in form.find_all('input') if i.get('name')]
                     
@@ -60,17 +62,9 @@ class ReconCrawler:
                 # 3. Extract Script Tags (For Semantic Reconstruction)
                 for script in soup.find_all('script', src=True):
                     src = script['src']
-                    js_url = ""
-                    if src.startswith('/'):
-                        js_url = self.target_url + src
-                    elif src.startswith('http'):
-                        # Only include internal scripts from the same hostname
-                        from urllib.parse import urlparse
-                        if urlparse(src).netloc == urlparse(self.target_url).netloc:
-                            js_url = src
-                    else:
-                        # Handle relative paths without leading slash
-                        js_url = self.target_url + "/" + src
+                    js_url = urljoin(self.target_url + "/", src)
+                    if urlparse(js_url).netloc != self.base_netloc:
+                        continue
                     
                     if js_url:
                         js_urls.add(js_url)

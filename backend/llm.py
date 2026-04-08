@@ -1,10 +1,18 @@
-from google import genai
-from groq import Groq
 import os
 import json
 import time
 from typing import List, Dict, Any
 from dotenv import load_dotenv
+
+try:
+    from google import genai
+except ImportError:
+    genai = None
+
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None
 
 # Load environment variables
 load_dotenv()
@@ -15,12 +23,12 @@ GEMINI_API_KEY  = os.environ.get("GOOGLE_API_KEY", "")
 
 # Initialize Gemini Client (New SDK)
 gemini_client = None
-if GEMINI_API_KEY:
+if GEMINI_API_KEY and genai is not None:
     gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Initialize Groq if available
 groq_client = None
-if GROQ_API_KEY and GROQ_API_KEY != "PASTE_YOUR_GROQ_KEY_HERE":
+if GROQ_API_KEY and GROQ_API_KEY != "PASTE_YOUR_GROQ_KEY_HERE" and Groq is not None:
     groq_client = Groq(api_key=GROQ_API_KEY)
 
 def _call_llm(prompt: str) -> str:
@@ -111,6 +119,22 @@ def _parse_gemini_json(text: str) -> list:
     if isinstance(parsed, list):
         return parsed
     return []
+
+
+def _normalize_string_list(values: Any) -> List[str]:
+    normalized: List[str] = []
+    if not isinstance(values, list):
+        return normalized
+
+    for value in values:
+        if isinstance(value, str):
+            normalized.append(value)
+        elif isinstance(value, dict):
+            normalized.append(str(next(iter(value.values()), "")))
+        else:
+            normalized.append(str(value))
+
+    return [value for value in normalized if value]
 
 
 def generate_fuzzing_payloads(target_urls: List[str]) -> List[str]:
@@ -303,11 +327,11 @@ def generate_bespoke_payloads(sink_context: Dict[str, Any]) -> List[str]:
     """
 
     try:
-        response = model.generate_content(prompt)
-        text = response.text.replace("```json", "").replace("```", "").strip()
-        payloads = json.loads(text)
-        return payloads if isinstance(payloads, list) else []
-    except:
+        text = _call_llm(prompt)
+        payloads = _parse_gemini_json(text)
+        return _normalize_string_list(payloads)
+    except Exception as e:
+        print(f"[!] Bespoke payload generation failed: {e}")
         return []
 
 

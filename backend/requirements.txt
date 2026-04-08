@@ -9,3 +9,4 @@ pydantic
 aiohttp
 websockets
 markdown
+sqlalchemy

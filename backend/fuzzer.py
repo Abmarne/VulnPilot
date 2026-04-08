@@ -1,4 +1,5 @@
 import concurrent.futures
+import time
 import requests
 from typing import List, Dict, Any
 
@@ -240,13 +241,13 @@ class Fuzzer:
                 # Send two more timed requests to confirm it's not a fluke
                 delays = []
                 for _ in range(2):
-                    start = requests.compat.time.time()
+                    start = time.time()
                     try:
                         if method == "POST":
                             self.session.post(url, timeout=6)
                         else:
                             self.session.get(url, timeout=6)
-                        delays.append(requests.compat.time.time() - start)
+                        delays.append(time.time() - start)
                     except:
                         delays.append(6) # Timeout occurred
                 
