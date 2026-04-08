@@ -12,7 +12,7 @@ VulnPilot isn't just a scanner. It's a context-aware security engineer that **Fi
 
 ### 🎮 The War Room (Real-time Dashboard)
 A high-contrast, WebSocket-driven dashboard that streams scan logs and findings in real-time.
-- **5-Stage Live Pipeline**: Tracking progress from Init → Recon → SAST → Fuzzing → Analysis.
+- **7-Stage Deep Pipeline**: Tracking progress from Init → Recon → SCA → SAST → Logic → Fuzzing → Analysis.
 - **Micro-animations & Alerts**: High-confidence "Verified Proof" badges for proven bugs.
 
 ### 🛡️ The Active Fixer (Auto-Remediation)
@@ -20,15 +20,12 @@ Turn findings into secure code with one click.
 - **AI-Powered Refactoring**: Gemini 2.0 Flash rewrites entire source files to remove vulnerabilities (SQLi, XSS, etc.) while preserving all application logic.
 - **Secure Implementation Snippets**: Instant, high-fidelity code patches ready for copy-paste or automatic applying.
 
-### 🕵️‍♂️ Hybrid Context-Aware Engine
+### 🕵️‍♂️ Deep 'Active-Offensive' Engine
+- **Bespoke AI Fuzzing**: Generates custom security bypasses tailored specifically to the detected code logic.
+- **Logic & IDOR Auditor**: Automatically detects authorization flaws and Insecure Direct Object References.
+- **SCA (Supply Chain Audit)**: Scans dependencies for known CVEs and third-party library risks.
 - **Taint-Chasing SAST**: Multi-file data flow analysis to reduce false positives.
-- **Double-Blind Fuzzing**: Mathematical verification of vulnerabilities via logical DAST testing.
-- **Ghost API Recon**: Reverse-engineers client-side JS to find hidden and undocumented endpoints.
 
-### ⛓️ CI/CD Security Gate
-A headless CLI (`cli.py`) that permits fully automated repo auditing in GitHub Actions.
-- **Exit Code Enforcement**: Fails builds if High/Critical risks are detected.
-- **Automatic PR Commenting**: Posts full security reports directly as PR comments.
 
 ---
 
@@ -67,9 +64,10 @@ Navigate to `http://localhost:3000` to start your first live scan.
 
 ---
 
+
 ## 🤖 Headless CLI Usage
 
-For CI/CD pipelines, use the headless agent:
+For manual repository auditing:
 ```bash
 python backend/cli.py --target "https://your-site.com" --fail-on "High" --output "report.md"
 ```
@@ -84,7 +82,7 @@ python backend/cli.py --target "./" --apply-fix
 ## 🏗️ Architecture Stack
 - **Framework**: FastAPI (Orchestration & WebSockets)
 - **UI**: Next.js (Tailwind CSS, Real-time React Hooks)
-- **Brain**: Google Gemini 2.0 Flash / Llama 3.3 (Logic & Remediation)
+- **Brain**: Google Gemini 2.0 Flash / Llama 3 (Logic & Remediation)
 - **Analysis**: Custom-built Taint Analysis Engine & DAST Fuzzer
 
 ---
