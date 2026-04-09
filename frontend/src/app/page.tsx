@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ArenaModal } from "./components/ArenaModal";
 
 const API_BASE = "http://localhost:8000";
 const WS_URL = "ws://localhost:8000/api/scan/ws";
@@ -62,6 +63,7 @@ export default function Home() {
   const [importError, setImportError] = useState<string | null>(null);
   const [fixingUrls, setFixingUrls] = useState<Record<string, boolean>>({});
   const [fixStatus, setFixStatus] = useState<Record<string, "success" | "error" | null>>({});
+  const [arenaFinding, setArenaFinding] = useState<Finding | null>(null);
 
   const ws = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -220,6 +222,7 @@ export default function Home() {
   };
 
   return (
+    <>
     <main className="min-h-screen bg-neutral-950 p-8 text-neutral-200">
       <div className="mx-auto max-w-6xl space-y-8">
         <header className="space-y-2 text-center">
@@ -250,7 +253,7 @@ export default function Home() {
             <select value={selectedProfileId} onChange={(event) => setSelectedProfileId(event.target.value)} className="rounded border border-neutral-800 bg-neutral-950 px-3 py-3 text-sm">
               <option value="">No saved attack profile</option>
               {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
+                <option key={`profile-${profile.id}`} value={profile.id}>
                   {profile.name} ({profile.request_count} requests, {profile.source_type})
                 </option>
               ))}
@@ -272,7 +275,7 @@ export default function Home() {
               <h3 className="mb-4 text-xs font-bold uppercase tracking-widest text-neutral-500">Mission Progress</h3>
               <div className="space-y-3">
                 {stages.filter((stage) => stage !== "complete").map((stage, index) => (
-                  <div key={stage} className="flex items-center gap-3">
+                  <div key={`stage-${stage}`} className="flex items-center gap-3">
                     <div className={`flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-bold ${stageClass(stage)}`}>{index + 1}</div>
                     <div className="flex-1">
                       <div className="text-[10px] uppercase tracking-widest text-neutral-400">{stage}</div>
@@ -288,7 +291,7 @@ export default function Home() {
               <div className="mb-3 text-xs font-bold uppercase tracking-widest text-neutral-500">engine_output.log</div>
               <div className="h-80 space-y-1 overflow-y-auto rounded border border-neutral-800 bg-neutral-950 p-3 font-mono text-xs">
                 {logs.map((log, index) => (
-                  <div key={`${log.stage}-${index}`} className={log.message.startsWith("[!]") ? "text-red-400" : log.message.startsWith("[*]") ? "text-emerald-400" : "text-neutral-300"}>
+                  <div key={`log-${index}`} className={log.message.startsWith("[!]") ? "text-red-400" : log.message.startsWith("[*]") ? "text-emerald-400" : "text-neutral-300"}>
                     [{new Date().toLocaleTimeString([], { hour12: false })}] {log.message}
                   </div>
                 ))}
@@ -310,7 +313,7 @@ export default function Home() {
             }).map((finding, index) => {
               const key = finding.url || finding.url_pattern || finding.file_path || `finding-${index}`;
               return (
-                <article key={key + index} className="space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6">
+                <article key={`f-${index}-${key}`} className="space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h3 className="text-xl font-bold text-white">{finding.vulnerability_type || "Untitled Finding"}</h3>
@@ -395,6 +398,18 @@ export default function Home() {
                       </div>
                     </div>
                   )}
+
+                  {/* Adversarial Arena launch button */}
+                  <div className="border-t border-neutral-800 pt-4">
+                    <button
+                      onClick={() => setArenaFinding(finding)}
+                      className="w-full rounded-lg border border-orange-500/40 bg-gradient-to-r from-red-900/20 to-orange-900/20 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-orange-400 hover:from-red-900/40 hover:to-orange-900/40 transition-all flex items-center justify-center gap-2"
+                    >
+                      <span>⚔</span>
+                      <span>Launch AI Adversarial Arena</span>
+                      <span className="rounded border border-orange-500/30 px-1.5 py-0.5 text-[9px] text-orange-500">Red vs Blue + Honey-Patch</span>
+                    </button>
+                  </div>
                 </article>
               );
             })}
@@ -402,5 +417,7 @@ export default function Home() {
         )}
       </div>
     </main>
+    {arenaFinding && <ArenaModal finding={arenaFinding} onClose={() => setArenaFinding(null)} />}
+    </>
   );
 }
