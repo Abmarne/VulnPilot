@@ -247,8 +247,21 @@ class ScannerEngine:
 
         raw_anomalies: List[Dict[str, Any]] = []
         if target_url and endpoints:
+            # Extract actual application data schemas for AI contextual hacking
+            schema_context = {"params": set(), "json_keys": set(), "form_fields": set()}
+            for ep in endpoints:
+                if ep.get("params"): schema_context["params"].update(ep["params"])
+                if ep.get("json_fields"): schema_context["json_keys"].update(ep["json_fields"])
+                if ep.get("form_fields"): schema_context["form_fields"].update(ep["form_fields"])
+            
+            schema_context_list = {
+                "params": list(schema_context["params"]),
+                "json_keys": list(schema_context["json_keys"]),
+                "form_fields": list(schema_context["form_fields"])
+            }
+
             await self._emit_log(f"[*] DAST: Starting fuzzer against {target_url}...", "dast")
-            fuzzer = Fuzzer(endpoints, self.session_cookie, guided_insights)
+            fuzzer = Fuzzer(endpoints, self.session_cookie, guided_insights, schema_context_list)
             raw_anomalies = fuzzer.run_fuzzer(base_url=target_url)
             await self._emit_log(f"[*] DAST: Fuzzer found {len(raw_anomalies)} anomalies.", "dast")
 

@@ -141,18 +141,25 @@ def _normalize_string_list(values: Any) -> List[str]:
     return [value for value in normalized if value]
 
 
-def generate_fuzzing_payloads(target_urls: List[str]) -> List[str]:
+def generate_fuzzing_payloads(target_urls: List[str], schema_context: Dict[str, Any] = None) -> List[str]:
     """Uses LLM to dynamically generate benign testing payloads."""
+    import json
+    schema_info = ""
+    if schema_context and any(schema_context.values()):
+        schema_info = f"\nEMPIRICAL APPLICATION SCHEMA (Your attack payloads must mutate these specific keys):\n{json.dumps(schema_context, indent=2)}\n"
+
     prompt = f"""
-    You are an expert security engineer building a DAST tool.
+    You are an expert security engineer building an enterprise-grade DAST tool.
     Generate 10 highly effective, BENIGN testing payloads for these endpoints:
     {target_urls}
-
+    {schema_info}
+    
     Payloads should safely trigger database errors, 500 errors, or reflections.
+    If an Empirical Application Schema is provided above, generate payloads that specifically target/manipulate those exact parameters, JSON keys, and form fields.
     Do NOT generate shell exploits or data-destroying payloads.
 
     Respond ONLY as a valid JSON array of strings. No markdown, no text outside the array.
-    Example: ["' OR 1=1 --", "<script>alert(1)</script>", "../../../../etc/passwd"]
+    Example: ["' OR 1=1 --", "<script>alert(1)</script>", "../../../../etc/passwd", "{{\"email\": \"admin' OR 1=1--\"}}"]
     """
     try:
         print("[*] Asking LLM to craft custom fuzzing payloads...")
@@ -390,9 +397,10 @@ def analyze_anomalies(anomalies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
           "vulnerability_type": "e.g. SQL Injection",
           "severity": "Low|Medium|High|Critical",
           "explanation": "2-sentence explanation of the risk.",
+          "tutor_explanation": "ACT AS A SECURITY TUTOR. Write a structured explanation detailing EXACTLY how the application's specific data schema/parameters were manipulated by this payload, why the backend logic failed to stop it, and what a malicious attacker's next step would be.",
           "manual_poc": "Step-by-step manual verification and validation.",
           "poc_script": "A copy-pasteable Python or Curl script to reproduce the vulnerability (safely).",
-          "remediation_code": "The SECURE version of the code that fixes this bug (e.g. using parameterized queries).",
+          "remediation_code": "The SECURE version of the code that fixes this bug (e.g. using parameterized queries or input validation).",
           "remediation_steps": "Step-by-step resolution plan for developers (and 3rd party tools).",
           "is_verified": "boolean: true if the fuzzer logically proved this bug"
         }}

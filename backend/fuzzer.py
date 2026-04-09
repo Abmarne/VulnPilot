@@ -12,17 +12,18 @@ import llm
 
 
 class Fuzzer:
-    def __init__(self, targets: List[Dict[str, Any]], session_cookie: str = None, guided_insights: List[Dict[str, Any]] = None):
+    def __init__(self, targets: List[Dict[str, Any]], session_cookie: str = None, guided_insights: List[Dict[str, Any]] = None, schema_context: Dict[str, Any] = None):
         self.targets = targets
         self.guided_insights = guided_insights or []
         self.session = requests.Session()
+        self.schema_context = schema_context or {}
 
         if session_cookie:
             self.session.headers.update({"Cookie": session_cookie})
 
         sample_urls = [target["url"] for target in self.targets[:5]] if self.targets else []
-        self.payloads = llm.generate_fuzzing_payloads(sample_urls)
-        print(f"[*] Loaded {len(self.payloads)} custom testing payloads from LLM.")
+        self.payloads = llm.generate_fuzzing_payloads(sample_urls, self.schema_context)
+        print(f"[*] Loaded {len(self.payloads)} custom schema-adapted testing payloads from LLM.")
         if self.guided_insights:
             print(f"[*] Fuzzer is ARMED with {len(self.guided_insights)} guided insights from SAST.")
 
