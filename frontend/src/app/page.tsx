@@ -25,6 +25,7 @@ type Finding = {
   vulnerability_type?: string;
   severity?: string;
   explanation?: string;
+  tutor_explanation?: string;
   url?: string;
   url_pattern?: string;
   file_path?: string;
@@ -318,7 +319,19 @@ export default function Home() {
                     <div className="rounded border border-neutral-700 px-2 py-1 text-xs uppercase tracking-widest text-neutral-300">{finding.severity || "Unknown"}</div>
                   </div>
                   <div className="rounded border border-emerald-900/30 bg-emerald-950/20 p-3 font-mono text-xs text-emerald-400">{finding.url || finding.file_path || finding.url_pattern || "General Surface"}</div>
-                  <p className="text-sm leading-relaxed text-neutral-300">{finding.explanation}</p>
+                  
+                  {finding.tutor_explanation ? (
+                    <div className="rounded-lg border border-purple-500/30 bg-purple-950/20 p-4">
+                      <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-purple-400">
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                        AI Security Tutor Analysis
+                      </div>
+                      <p className="text-sm leading-relaxed text-purple-100">{finding.tutor_explanation}</p>
+                    </div>
+                  ) : (
+                    <p className="text-sm leading-relaxed text-neutral-300">{finding.explanation}</p>
+                  )}
+
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="rounded border border-neutral-800 bg-neutral-950 p-3">
                       <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-emerald-400">Manual Validation</div>
