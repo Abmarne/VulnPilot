@@ -2,21 +2,25 @@ import os
 import json
 import time
 import re
-from typing import List, Dict, Any, Optional, cast
-from dotenv import load_dotenv
+from importlib import import_module
+from typing import List, Dict, Any, Optional, Callable, cast
 
-try:
-    from google import genai
-except ImportError:
-    genai = None
 
-try:
-    from groq import Groq
-except ImportError:
-    Groq = None
+def _load_attr(module_name: str, attr_name: str) -> Any:
+    try:
+        module = import_module(module_name)
+        return getattr(module, attr_name, None)
+    except ImportError:
+        return None
+
+
+load_dotenv = cast(Optional[Callable[[], None]], _load_attr("dotenv", "load_dotenv"))
+genai = _load_attr("google.genai", "Client")
+Groq = _load_attr("groq", "Groq")
 
 # Load environment variables
-load_dotenv()
+if load_dotenv is not None:
+    load_dotenv()
 
 # ── Provider Selection ──────────────────────────────────────────────────────
 GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")
@@ -25,7 +29,7 @@ GEMINI_API_KEY  = os.environ.get("GOOGLE_API_KEY", "")
 # Initialize Gemini Client (New SDK)
 gemini_client: Optional[Any] = None
 if GEMINI_API_KEY and genai is not None:
-    gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    gemini_client = genai(api_key=GEMINI_API_KEY)
 
 # Initialize Groq if available
 groq_client: Optional[Any] = None

@@ -1,95 +1,169 @@
-# 🛡️ VulnPilot
+# VulnPilot
 
-![VulnPilot Logo](file:///C:/Users/Abhiraj/.gemini/antigravity/brain/4170566f-c42b-479a-b23f-b086fe977bad/vulnpilot_logo_1775565443642.png)
+> The world's first fully automated active security platform.
 
-> **The World's First Fully-Automated 'Active Security' Platform.** 🚀
-
-VulnPilot isn't just a scanner. It's a context-aware security engineer that **Finds, Verifies, Fixes, and Blocks** vulnerabilities in real-time. Designed for developers and SOC teams, it bridges the gap between vulnerability discovery and secure code remediation.
+VulnPilot is a context-aware security assistant that finds, verifies, fixes, and explains vulnerabilities in real time. It combines live web-app testing, source-code analysis, replayable evidence, and AI-assisted remediation in one workflow.
 
 ---
 
-## 🌟 Core Superpowers
+## Core Superpowers
 
-### 🎮 The War Room (Real-time Dashboard)
-A high-contrast, WebSocket-driven dashboard that streams scan logs and findings in real-time.
-- **7-Stage Deep Pipeline**: Tracking progress from Init → Recon → SCA → SAST → Logic → Fuzzing → Analysis.
-- **Micro-animations & Alerts**: High-confidence "Verified Proof" badges for proven bugs.
+### The War Room
+A real-time dashboard streams logs, progress, and findings over WebSockets.
+- Multi-stage pipeline: `init -> profile -> recon -> sca -> sast -> logic -> dast -> analysis`
+- Live finding stream with remediation and replay evidence
 
-### 🛡️ The Active Fixer (Auto-Remediation)
+### The Active Fixer
 Turn findings into secure code with one click.
-- **AI-Powered Refactoring**: Gemini 2.0 Flash rewrites entire source files to remove vulnerabilities (SQLi, XSS, etc.) while preserving all application logic.
-- **Secure Implementation Snippets**: Instant, high-fidelity code patches ready for copy-paste or automatic applying.
+- AI-powered refactoring for local source files
+- Secure remediation snippets and developer-facing steps
 
-### 🕵️‍♂️ Deep 'Active-Offensive' Engine
-- **Bespoke AI Fuzzing**: Generates custom security bypasses tailored specifically to the detected code logic.
-- **Logic & IDOR Auditor**: Automatically detects authorization flaws and Insecure Direct Object References.
-- **SCA (Supply Chain Audit)**: Scans dependencies for known CVEs and third-party library risks.
-- **Taint-Chasing SAST**: Multi-file data flow analysis to reduce false positives.
+### Authenticated Attack Profiles
+Import real authenticated traffic and replay it during scanning for deeper pentest coverage.
+- HAR import for many requests captured from a browser session
+- cURL import for one important authenticated API request
+- Replayable evidence with baseline request, mutated request, status delta, and replay cURL
 
+### Deep Active-Offensive Engine
+- Bespoke AI fuzzing tied to discovered parameters and sinks
+- Logic and IDOR auditing
+- Dependency scanning
+- Taint-chasing SAST to reduce false positives
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
-### 1️⃣ Clone and Prepare Env
+### 1. Clone and Configure
 ```bash
 git clone https://github.com/Abmarne/VulnPilot.git
-cd VulnPilot/backend
+cd VulnPilot
 ```
-Create a `.env` file in the `backend/` directory:
+
+Create a `.env` file in `backend/`:
 ```env
 GOOGLE_API_KEY=your_gemini_key_here
 GROQ_API_KEY=your_groq_key_here
 ```
 
-### 2️⃣ Install Dependencies
+### 2. Install Dependencies
+Backend:
 ```bash
-# Backend (Python 3.10+)
-pip install -r requirements.txt
+cd backend
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
 
-# Frontend (Next.js)
+Frontend:
+```bash
 cd ../frontend
 npm install
 ```
 
-### 3️⃣ Launch the War Room
+### 3. Start the App
+Backend:
 ```bash
-# Start Backend
-python backend/main.py
+cd ../backend
+.venv\Scripts\python.exe main.py
+```
 
-# Start Frontend
+Frontend:
+```bash
+cd ../frontend
 npm run dev
 ```
-Navigate to `http://localhost:3000` to start your first live scan.
+
+Open `http://localhost:3000`.
 
 ---
 
+## Using Authenticated Attack Profiles
 
-## 🤖 Headless CLI Usage
+Authenticated attack profiles help VulnPilot reach logged-in pages, dashboards, and internal APIs that a normal crawler may miss.
 
-For manual repository auditing:
+### What `Import HAR` Means
+`Import HAR` means uploading a HAR file exported from your browser DevTools Network tab.
+
+A HAR file contains real traffic from your session, including:
+- request URLs
+- HTTP methods
+- headers
+- cookies
+- request bodies
+
+Use HAR import when you want VulnPilot to learn a full authenticated workflow from a real browser session.
+
+### What `Import cURL Profile` Means
+`Import cURL Profile` means pasting one real cURL command into the dashboard.
+
+Use cURL import when you want to target one important authenticated API request quickly.
+
+### HAR vs cURL
+- `HAR`: best for many requests captured from a browser session
+- `cURL`: best for one specific API request or endpoint
+
+### How To Export a HAR File
+In Chrome or Edge:
+1. Open DevTools.
+2. Open the `Network` tab.
+3. Log in and perform the actions you want VulnPilot to learn.
+4. Right-click the request list.
+5. Choose `Save all as HAR with content`.
+
+### How To Use It In VulnPilot
+1. Start the backend and frontend.
+2. Open `http://localhost:3000`.
+3. Enter the target URL in the main target field.
+4. Import one of the following:
+   - a HAR file in `Import HAR Profile`
+   - a cURL command in `Import cURL Profile`
+5. Select the saved profile from `Saved Attack Profile`.
+6. Keep `Use profile requests` enabled.
+7. Launch the scan.
+
+### Example cURL Import
 ```bash
-python backend/cli.py --target "https://your-site.com" --fail-on "High" --output "report.md"
+curl https://example.com/api/me \
+  -H "Cookie: session=abc123" \
+  -H "Content-Type: application/json" \
+  -d "{\"q\":\"test\"}"
 ```
 
-To automatically apply security fixes to your local codebase:
+### What Happens During the Scan
+When a profile is selected, VulnPilot will:
+- replay the imported authenticated requests
+- merge them with normal crawler discovery
+- mutate real parameters, headers, and bodies
+- attach replayable evidence to findings
+
+### Where Profiles Are Stored
+Profiles are stored locally in a JSON file inside `backend/.data/attack_profiles.json`. No extra database setup is required.
+
+---
+
+## Headless CLI Usage
+
+Manual repository or target audit:
 ```bash
-python backend/cli.py --target "./" --apply-fix
+cd backend
+.venv\Scripts\python.exe cli.py --target "https://your-site.com" --fail-on "High" --output "report.md"
+```
+
+Apply security fixes to a local codebase:
+```bash
+cd backend
+.venv\Scripts\python.exe cli.py --target "./" --apply-fix
 ```
 
 ---
 
-## 🏗️ Architecture Stack
-- **Framework**: FastAPI (Orchestration & WebSockets)
-- **UI**: Next.js (Tailwind CSS, Real-time React Hooks)
-- **Brain**: Google Gemini 2.0 Flash / Llama 3 (Logic & Remediation)
-- **Analysis**: Custom-built Taint Analysis Engine & DAST Fuzzer
+## Architecture Stack
+- Framework: FastAPI
+- UI: Next.js
+- Brain: Google Gemini / Groq
+- Analysis: custom SAST + DAST + replayable request fuzzing
 
 ---
 
-## 🤝 Contributing
-Secure code is a collective effort. Feel free to open issues or PRs to improve the remediation prompts or the fuzzer logic!
-
----
-
-*“Don’t just find bugs. Neutralize them with VulnPilot.”* 🛡️
+## Contributing
+Secure code is a collective effort. Feel free to open issues or PRs to improve the scanner, remediation prompts, or fuzzing logic.
