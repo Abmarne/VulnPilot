@@ -29,7 +29,7 @@ HF_API_KEY = os.environ.get("HF_API_KEY", "")
 # Red Agent  → code-focused model, best at finding bypasses
 RED_MODEL  = "Qwen/Qwen2.5-Coder-32B-Instruct"
 # Blue Agent → instruction-tuned model, best at writing secure fixes / deception
-BLUE_MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
+BLUE_MODEL = "mistralai/Mistral-7B-Instruct-v0.2"
 
 MAX_ROUNDS = 3  # Max Red vs. Blue battle rounds per finding
 
