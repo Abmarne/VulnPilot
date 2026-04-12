@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 const ARENA_WS = "ws://localhost:8000/api/arena/ws";
 
 type BattleEvent = {
-  id: number;
+  id: string;
   event: string;
   agent: "red" | "blue" | "system";
   message: string;
@@ -45,18 +45,16 @@ export function ArenaModal({ finding, onClose }: ArenaModalProps) {
   const [error, setError] = useState<string | null>(null);
   const ws = useRef<WebSocket | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
-  let eventId = useRef(0);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [events]);
 
   const addEvent = (event: string, agent: "red" | "blue" | "system", message: string, payload?: Record<string, unknown>) => {
-    eventId.current += 1;
     setEvents((prev) => [
       ...prev,
       {
-        id: eventId.current,
+        id: crypto.randomUUID(),
         event,
         agent,
         message,
