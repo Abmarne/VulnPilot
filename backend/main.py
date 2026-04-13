@@ -227,6 +227,7 @@ async def arena_websocket(websocket: WebSocket):
 
             if request_data.get("type") == "START_ARENA":
                 finding = request_data.get("finding", {})
+                target = request_data.get("target")
 
                 async def arena_emit(event: str, payload: dict):
                     await manager.send_personal_message(
@@ -234,7 +235,7 @@ async def arena_websocket(websocket: WebSocket):
                         websocket,
                     )
 
-                result = await run_arena(finding=finding, emit=arena_emit)
+                result = await run_arena(finding=finding, target=target, emit=arena_emit)
                 await manager.send_personal_message(
                     {"type": "arena_complete", "result": result},
                     websocket,

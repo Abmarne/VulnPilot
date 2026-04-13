@@ -35,10 +35,11 @@ type Finding = {
 
 type ArenaModalProps = {
   finding: Finding;
+  target: string;
   onClose: () => void;
 };
 
-export function ArenaModal({ finding, onClose }: ArenaModalProps) {
+export function ArenaModal({ finding, target, onClose }: ArenaModalProps) {
   const [events, setEvents] = useState<BattleEvent[]>([]);
   const [result, setResult] = useState<ArenaResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -76,7 +77,7 @@ export function ArenaModal({ finding, onClose }: ArenaModalProps) {
 
     socket.onopen = () => {
       addEvent("arena_start", "system", `⚔️  Arena started for: ${finding.vulnerability_type}`);
-      socket.send(JSON.stringify({ type: "START_ARENA", finding }));
+      socket.send(JSON.stringify({ type: "START_ARENA", finding, target }));
     };
 
     socket.onmessage = (e) => {

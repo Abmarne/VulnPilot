@@ -417,7 +417,7 @@ export default function Home() {
         )}
       </div>
     </main>
-    {arenaFinding && <ArenaModal finding={arenaFinding} onClose={() => setArenaFinding(null)} />}
+    {arenaFinding && <ArenaModal finding={arenaFinding} target={target} onClose={() => setArenaFinding(null)} />}
     </>
   );
 }
