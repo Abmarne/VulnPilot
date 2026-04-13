@@ -108,6 +108,14 @@ export function ArenaModal({ finding, target, onClose }: ArenaModalProps) {
           addEvent(ev, "system", `✅ ${data.message ?? "Code is PROVABLY SECURE!"}`);
         } else if (ev === "honey_deployed") {
           addEvent(ev, "system", `🍯 ${data.message ?? "Honey-Patch deployed!"}`);
+        } else if (ev === "sandbox_thinking") {
+          addEvent(ev, "system", data.message as string ?? "🛡️  Sandbox: Verifying exploit proof-of-concept...");
+        } else if (ev === "sandbox_result") {
+          const isValid = data.is_valid as boolean;
+          addEvent(ev, "system", isValid 
+            ? `❌ EXPLOIT SUCCESSFUL (Sandbox Verified): ${data.message as string ?? ""}`
+            : `✅ EXPLOIT BLOCKED (Sandbox Verified): The patch stopped the payload.`
+          );
         } else if (ev === "round_start") {
           addEvent(ev, "system", `─────── Round ${data.round as number} ───────`);
         } else if (ev === "arena_error") {

@@ -34,6 +34,7 @@ BLUE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 MAX_ROUNDS = 3  # Max Red vs. Blue battle rounds per finding
 
 from sast_engine import SastEngine
+from sandbox import SandboxManager
 
 
 def _parse_arena_json(text: str) -> Dict[str, Any]:
@@ -291,6 +292,34 @@ async def run_arena(
         })
 
         battle_log.append({"round": round_num, "agent": "RED", "result": red_result})
+
+        # ── SANDBOX VERIFICATION ─────────────────────────────────────────────
+        if red_result.get("bypassed") and red_result.get("bypass_payload"):
+            await _emit("sandbox_thinking", {"message": "🛡️  Sandbox: Verifying exploit proof-of-concept..."})
+            try:
+                import asyncio
+                sandbox = SandboxManager()
+                # Run sandbox verification in a thread to keep event loop responsive
+                is_valid, sb_msg = await asyncio.to_thread(
+                    sandbox.verify_exploit, 
+                    code=current_fix, 
+                    payload=red_result.get("bypass_payload"), 
+                    vuln_type=vuln_type
+                )
+                
+                await _emit("sandbox_result", {
+                    "round": round_num,
+                    "is_valid": is_valid,
+                    "message": sb_msg
+                })
+                
+                if not is_valid:
+                    print("[*] Arena: Sandbox blocked the payload that Red Agent predicted would work.")
+                    red_result["sandbox_verified"] = False
+                else:
+                    red_result["sandbox_verified"] = True
+            except Exception as e:
+                print(f"[!] Arena Sandbox Error: {e}")
 
         # If Red cannot bypass → code is provably secure!
         if not red_result.get("bypassed"):
