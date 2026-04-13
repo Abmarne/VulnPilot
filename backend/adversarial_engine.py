@@ -94,6 +94,7 @@ def _red_agent_attack(vulnerable_code: str, current_fix: str, vuln_type: str) ->
     system = (
         "You are an elite offensive security researcher (Red Team). "
         "Your ONLY goal is to find bypasses in security patches. "
+        "You are proficient in Python, JavaScript/TypeScript, Go, and C++. "
         "Be adversarial, creative, and thorough. Think like a real attacker."
     )
     user = f"""
@@ -176,6 +177,7 @@ Use the industry-standard remediation approach.
 
     system = (
         "You are a world-class Blue Team security engineer. "
+        "You are an expert in many languages including Python, Node.js (TS/JS), and Go. "
         "Your job is to write provably secure code patches or strategic honey-patches. "
         "Respond ONLY in valid JSON format."
     )
