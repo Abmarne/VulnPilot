@@ -7,7 +7,7 @@ from pydantic import BaseModel
 import uvicorn
 
 from engine import ScannerEngine
-from profile_parser import parse_curl_command, parse_har_content
+from profile_parser import parse_curl_command, parse_har_content, parse_openapi_content
 from profile_store import get_profile, list_profiles, save_profile
 from sast_engine import SastEngine
 from adversarial_engine import run_arena
@@ -107,6 +107,37 @@ async def import_har_profile(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail="Invalid HAR file.") from exc
+
+    profile = save_profile(
+        name=name or parsed["name"],
+        target=target,
+        source_type=parsed["source_type"],
+        requests=parsed["requests"],
+    )
+    return {
+        "profile": {
+            "id": profile["id"],
+            "name": profile["name"],
+            "target": profile["target"],
+            "target_host": profile["target_host"],
+            "source_type": profile["source_type"],
+            "created_at": profile["created_at"],
+            "request_count": len(profile.get("requests", [])),
+        }
+    }
+
+
+@app.post("/api/profiles/import-openapi")
+async def import_openapi_profile(
+    target: str = Form(...),
+    name: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+):
+    content = await file.read()
+    try:
+        parsed = parse_openapi_content(content, target=target, filename=name or file.filename or "Imported OpenAPI")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     profile = save_profile(
         name=name or parsed["name"],

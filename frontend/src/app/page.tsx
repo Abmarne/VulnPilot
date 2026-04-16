@@ -59,6 +59,7 @@ export default function Home() {
   const [useProfileRequests, setUseProfileRequests] = useState(true);
   const [harFile, setHarFile] = useState<File | null>(null);
   const [curlCommand, setCurlCommand] = useState("");
+  const [openapiFile, setOpenapiFile] = useState<File | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [fixingUrls, setFixingUrls] = useState<Record<string, boolean>>({});
@@ -180,6 +181,30 @@ export default function Home() {
     }
   };
 
+  const importOpenapi = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!openapiFile || !target.trim()) {
+      setImportError("Select an OpenAPI file and target first.");
+      return;
+    }
+    try {
+      setImportError(null);
+      setImportMessage(null);
+      const formData = new FormData();
+      formData.append("file", openapiFile);
+      formData.append("target", target.trim());
+      formData.append("name", openapiFile.name.replace(/\.[^.]+$/, ""));
+      const response = await fetch(`${API_BASE}/api/profiles/import-openapi`, { method: "POST", body: formData });
+      const data = (await response.json()) as { detail?: string; profile?: ProfileSummary };
+      if (!response.ok) throw new Error(data.detail || "OpenAPI import failed.");
+      setImportMessage(`Imported ${data.profile?.name || "OpenAPI profile"}.`);
+      setOpenapiFile(null);
+      await refreshProfiles();
+    } catch (error) {
+      setImportError((error as Error).message);
+    }
+  };
+
   const importCurl = async (event: FormEvent) => {
     event.preventDefault();
     if (!curlCommand.trim() || !target.trim()) {
@@ -230,7 +255,7 @@ export default function Home() {
           <p className="text-neutral-400">Real-time hybrid security analysis with authenticated attack profiles.</p>
         </header>
 
-        <section className="grid gap-6 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6 xl:grid-cols-2">
+        <section className="grid gap-6 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6 xl:grid-cols-3">
           <form onSubmit={importHar} className="space-y-3">
             <h2 className="text-sm font-bold uppercase tracking-widest text-teal-400">Import HAR Profile</h2>
             <input type="file" accept=".har,.json" onChange={(event) => setHarFile(event.target.files?.[0] || null)} className="w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm" />
@@ -241,7 +266,12 @@ export default function Home() {
             <textarea rows={5} value={curlCommand} onChange={(event) => setCurlCommand(event.target.value)} placeholder='curl "https://target/app" -H "Cookie: session=..."' className="w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-2 font-mono text-sm" />
             <button type="submit" className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-bold uppercase tracking-widest text-neutral-950">Import cURL</button>
           </form>
-          {(importMessage || importError) && <div className={`xl:col-span-2 rounded border px-4 py-3 text-sm ${importError ? "border-red-500/30 bg-red-500/10 text-red-400" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"}`}>{importError || importMessage}</div>}
+          <form onSubmit={importOpenapi} className="space-y-3">
+            <h2 className="text-sm font-bold uppercase tracking-widest text-indigo-400">Import OpenAPI/Swagger</h2>
+            <input type="file" accept=".yaml,.yml,.json" onChange={(event) => setOpenapiFile(event.target.files?.[0] || null)} className="w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm" />
+            <button type="submit" className="w-full rounded bg-indigo-500 px-4 py-2 text-sm font-bold uppercase tracking-widest text-neutral-950">Import Spec</button>
+          </form>
+          {(importMessage || importError) && <div className={`xl:col-span-3 rounded border px-4 py-3 text-sm ${importError ? "border-red-500/30 bg-red-500/10 text-red-400" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"}`}>{importError || importMessage}</div>}
         </section>
 
         <form onSubmit={startScan} className="space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6">

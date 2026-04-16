@@ -12,3 +12,4 @@ markdown
 sqlalchemy
 python-multipart
 huggingface_hub
+pyyaml

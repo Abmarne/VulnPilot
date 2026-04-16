@@ -1,6 +1,7 @@
 import json
 import re
 import shlex
+import yaml
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -249,4 +250,97 @@ def parse_curl_command(command: str, target: str, name: Optional[str] = None) ->
         "name": name or "Imported cURL",
         "source_type": "curl",
         "requests": [normalized],
+    }
+
+
+def parse_openapi_content(content: bytes, target: str, filename: str = "Imported OpenAPI") -> Dict[str, Any]:
+    target_host = normalize_target_host(target)
+    try:
+        payload = json.loads(content.decode("utf-8", errors="ignore"))
+    except json.JSONDecodeError:
+        try:
+            payload = yaml.safe_load(content.decode("utf-8", errors="ignore"))
+        except yaml.YAMLError:
+            raise ValueError("Invalid OpenAPI file. Must be valid JSON or YAML.")
+
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid OpenAPI file. Must be a JSON or YAML object.")
+
+    paths = payload.get("paths", {})
+    if not paths:
+        raise ValueError("No paths found in OpenAPI specification.")
+
+    requests: List[Dict[str, Any]] = []
+    
+    base_url = target
+    if getattr(base_url, "endswith", None) and base_url.endswith("/"):
+        base_url = base_url[:-1]
+
+    for path, methods in paths.items():
+        if not isinstance(methods, dict):
+            continue
+        
+        for method, operation in methods.items():
+            if method.lower() not in {"get", "post", "put", "delete", "patch", "options", "head"}:
+                continue
+            
+            method_url = f"{base_url}{path}"
+            headers: Dict[str, str] = {}
+            cookies: Dict[str, str] = {}
+            body_text = ""
+            
+            params = []
+            if isinstance(operation, dict):
+                parameters = operation.get("parameters", [])
+                for param in parameters:
+                    if param.get("in") == "query":
+                        name = param.get("name")
+                        if name:
+                            params.append(f"{name}=1")
+                    elif param.get("in") == "header":
+                        name = param.get("name")
+                        if name:
+                            headers[name] = "dummy"
+            
+            if params:
+                method_url += "?" + "&".join(params)
+                
+            if isinstance(operation, dict):
+                req_body = operation.get("requestBody", {})
+                content_map = req_body.get("content", {})
+                if "application/json" in content_map:
+                    headers["Content-Type"] = "application/json"
+                    body_text = "{}"
+                    
+                    schema = content_map["application/json"].get("schema", {})
+                    if schema.get("type") == "object" and "properties" in schema:
+                        dummy_obj = {k: "dummy" for k in schema["properties"].keys()}
+                        body_text = json.dumps(dummy_obj)
+                
+                elif "application/x-www-form-urlencoded" in content_map:
+                    headers["Content-Type"] = "application/x-www-form-urlencoded"
+                    schema = content_map["application/x-www-form-urlencoded"].get("schema", {})
+                    if schema.get("type") == "object" and "properties" in schema:
+                        dummy_params = {k: "dummy" for k in schema["properties"].keys()}
+                        body_text = urlencode(dummy_params)
+
+            normalized = _normalize_request(
+                method=method.upper(),
+                url=method_url,
+                headers=headers,
+                cookies=cookies,
+                body_text=body_text,
+                request_name=path or filename,
+                source_type="openapi",
+            )
+            if normalized:
+                requests.append(normalized)
+
+    if not requests:
+        raise ValueError("No valid HTTP requests could be generated from the OpenAPI file.")
+
+    return {
+        "name": filename.rsplit(".", 1)[0] or "Imported OpenAPI",
+        "source_type": "openapi",
+        "requests": requests,
     }
