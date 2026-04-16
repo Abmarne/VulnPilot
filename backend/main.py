@@ -11,6 +11,7 @@ from profile_parser import parse_curl_command, parse_har_content, parse_openapi_
 from profile_store import get_profile, list_profiles, save_profile
 from sast_engine import SastEngine
 from adversarial_engine import run_arena
+import scan_store
 
 
 app = FastAPI(title="VulnPilot Backend", description="Hybrid DAST+SAST Orchestrator")
@@ -189,12 +190,17 @@ async def get_profiles(target: Optional[str] = None):
     return {"profiles": list_profiles(target)}
 
 
-@app.get("/api/profiles/{profile_id}")
-async def get_profile_detail(profile_id: int):
-    profile = get_profile(profile_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found.")
-    return {"profile": profile}
+@app.get("/api/history")
+async def get_history():
+    return {"scans": scan_store.list_scans()}
+
+
+@app.get("/api/history/{scan_id}")
+async def get_history_detail(scan_id: str):
+    scan = scan_store.get_scan(scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found.")
+    return {"scan": scan}
 
 
 @app.websocket("/api/scan/ws")
@@ -210,17 +216,36 @@ async def websocket_endpoint(websocket: WebSocket):
                 session_cookie = request_data.get("session_cookie", None)
                 profile_id = request_data.get("profile_id")
                 use_profile_requests = bool(request_data.get("use_profile_requests", False))
+                save_history = bool(request_data.get("save_history", False))
+
+                session_logs = []
+
+                async def handle_log(text: str, stage: str):
+                    session_logs.append({"message": text, "stage": stage})
+                    await emit_log(websocket, text, stage)
 
                 engine = ScannerEngine(
                     target=target,
                     session_cookie=session_cookie,
                     profile_id=profile_id,
                     use_profile_requests=use_profile_requests,
-                    on_log=lambda text, stage: emit_log(websocket, text, stage),
+                    on_log=handle_log,
                     on_progress=lambda stage, percent: emit_progress(websocket, stage, percent),
                     on_finding=lambda finding: emit_finding(websocket, finding),
                 )
-                await engine.run()
+                findings = await engine.run()
+
+                if save_history:
+                    scan_id = scan_store.save_scan(
+                        target=target,
+                        findings=findings,
+                        logs=session_logs,
+                        profile_id=profile_id
+                    )
+                    await manager.send_personal_message(
+                        {"type": "history_saved", "scan_id": scan_id},
+                        websocket
+                    )
 
             elif request_data.get("type") == "APPLY_FIX":
                 finding = request_data.get("finding")

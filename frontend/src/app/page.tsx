@@ -65,6 +65,9 @@ export default function Home() {
   const [fixingUrls, setFixingUrls] = useState<Record<string, boolean>>({});
   const [fixStatus, setFixStatus] = useState<Record<string, "success" | "error" | null>>({});
   const [arenaFinding, setArenaFinding] = useState<Finding | null>(null);
+  const [saveHistory, setSaveHistory] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [pastScans, setPastScans] = useState<any[]>([]);
 
   const ws = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -129,6 +132,7 @@ export default function Home() {
         session_cookie: sessionCookie || null,
         profile_id: selectedProfileId ? Number(selectedProfileId) : null,
         use_profile_requests: useProfileRequests && !!selectedProfileId,
+        save_history: saveHistory,
       }));
     };
 
@@ -146,6 +150,9 @@ export default function Home() {
         const key = String(data.url || "");
         setFixingUrls((prev) => ({ ...prev, [key]: false }));
         setFixStatus((prev) => ({ ...prev, [key]: data.success ? "success" : "error" }));
+      } else if (data.type === "history_saved") {
+        setImportMessage(`Scan saved to history (ID: ${data.scan_id})`);
+        fetchHistory();
       }
     };
 
@@ -236,6 +243,37 @@ export default function Home() {
     ws.current.send(JSON.stringify({ type: "APPLY_FIX", target, finding }));
   };
 
+  const fetchHistory = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/history`);
+      const data = await response.json();
+      setPastScans(data.scans || []);
+    } catch (err) {
+      console.error("Failed to fetch history", err);
+    }
+  };
+
+  const loadScan = async (scanId: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/history/${scanId}`);
+      const data = await response.json();
+      const scan = data.scan;
+      if (scan) {
+        setTarget(scan.target);
+        setFindings(scan.findings || []);
+        setLogs(scan.logs || []);
+        setProgress({ stage: "complete", percent: 100 });
+        setHistoryOpen(false);
+      }
+    } catch (err) {
+      alert("Failed to load scan history.");
+    }
+  };
+
+  useEffect(() => {
+    fetchHistory();
+  }, []);
+
   const renderEvidence = (title: string, request?: EvidenceRequest) => {
     if (!request) return null;
     return (
@@ -250,9 +288,17 @@ export default function Home() {
     <>
     <main className="min-h-screen bg-neutral-950 p-8 text-neutral-200">
       <div className="mx-auto max-w-6xl space-y-8">
-        <header className="space-y-2 text-center">
-          <h1 className="text-6xl font-black tracking-tighter text-emerald-400">VulnPilot</h1>
-          <p className="text-neutral-400">Real-time hybrid security analysis with authenticated attack profiles.</p>
+        <header className="flex flex-col items-center justify-between gap-4 border-b border-neutral-800 pb-8 md:flex-row md:text-left">
+          <div className="space-y-1">
+            <h1 className="text-6xl font-black tracking-tighter text-emerald-400">VulnPilot</h1>
+            <p className="text-neutral-400 text-sm">Real-time hybrid security analysis with authenticated attack profiles.</p>
+          </div>
+          <button 
+            onClick={() => setHistoryOpen(true)}
+            className="flex items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-2 text-xs font-bold uppercase tracking-widest text-neutral-400 hover:bg-neutral-800 transition-colors"
+          >
+            Mission History {pastScans.length > 0 && <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] text-emerald-400">{pastScans.length}</span>}
+          </button>
         </header>
 
         <section className="grid gap-6 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6 xl:grid-cols-3">
@@ -291,6 +337,10 @@ export default function Home() {
             <label className="flex items-center gap-3 rounded border border-neutral-800 bg-neutral-950 px-3 py-3 text-sm">
               <input type="checkbox" checked={useProfileRequests} onChange={(event) => setUseProfileRequests(event.target.checked)} className="accent-emerald-500" />
               Use profile requests
+            </label>
+            <label className="flex items-center gap-3 rounded border border-indigo-500/30 bg-indigo-950/20 px-3 py-3 text-sm text-indigo-300">
+              <input type="checkbox" checked={saveHistory} onChange={(event) => setSaveHistory(event.target.checked)} className="accent-indigo-500" />
+              Save session to local history (Opt-in)
             </label>
           </div>
           <button type="submit" disabled={loading} className="w-full rounded bg-emerald-500 px-4 py-3 text-sm font-black uppercase tracking-widest text-neutral-950 disabled:opacity-50">
@@ -448,6 +498,53 @@ export default function Home() {
       </div>
     </main>
     {arenaFinding && <ArenaModal finding={arenaFinding} target={target} onClose={() => setArenaFinding(null)} />}
+    
+    {/* Mission History Sidebar */}
+    {historyOpen && (
+      <div className="fixed inset-0 z-[60] flex justify-end bg-black/60 backdrop-blur-sm">
+        <div className="h-full w-full max-w-md border-l border-neutral-800 bg-neutral-950 p-6 shadow-2xl overflow-y-auto">
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="text-xl font-black text-white uppercase tracking-tighter">Mission Archive</h2>
+            <button onClick={() => setHistoryOpen(false)} className="rounded border border-neutral-800 px-3 py-1 text-xs text-neutral-500 hover:bg-neutral-900">Close</button>
+          </div>
+          
+          <div className="space-y-4">
+            {pastScans.length === 0 ? (
+              <div className="text-center py-12 text-neutral-600 italic text-sm">
+                No missions archived yet.
+              </div>
+            ) : (
+              pastScans.map((scan) => (
+                <div key={scan.id} className="group relative rounded-xl border border-neutral-800 bg-neutral-900/40 p-4 transition-all hover:border-indigo-500/50 hover:bg-neutral-900">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="font-mono text-[10px] text-neutral-500 uppercase tracking-widest">
+                        {new Date(scan.timestamp).toLocaleString()}
+                      </div>
+                      <div className="text-sm font-bold text-neutral-200 truncate max-w-[240px]">
+                        {scan.target}
+                      </div>
+                      <div className="flex items-center gap-2">
+                         <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400">
+                           {scan.finding_count} Findings
+                         </span>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => loadScan(scan.id)}
+                      className="rounded bg-indigo-500 p-2 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Reload Mission"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 }
