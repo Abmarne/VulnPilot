@@ -49,8 +49,10 @@ class LogicAuditor:
                         "vulnerability_type": "Potential IDOR (Insecure Direct Object Reference)",
                         "severity": "High",
                         "explanation": f"Neighbor resource '{neighbor_url}' returned a 200 OK. This suggests that the application does not properly validate authorization for related resources.",
+                        "impact": "An attacker can view or modify data belonging to other users by simply changing an ID in the URL.",
+                        "exploit_scenario": f"1. Log in as a user.\n2. Note your resource ID in the URL.\n3. Change the ID to {neighbor_id} to access another user's private data.",
                         "url": neighbor_url,
-                        "manual_poc": f"Navigate to {neighbor_url} and check for data leakage.",
+                        "manual_poc": f"Navigate to {neighbor_url} while logged in and check if you can see data that doesn't belong to you.",
                         "remediation_steps": "Implement object-level authorization checks to ensure the user has permission to access the specific ID requested."
                     })
             except:
@@ -73,8 +75,10 @@ class LogicAuditor:
                         "vulnerability_type": "Broken Access Control (Authentication Bypass)",
                         "severity": "High",
                         "explanation": f"The sensitive endpoint '{url}' is accessible without a valid session cookie, returning a full page (200 OK).",
+                        "impact": "Unauthenticated users can access restricted administrative or user-specific data, leading to full account takeovers or data breaches.",
+                        "exploit_scenario": "1. Identify a sensitive endpoint.\n2. Access the URL directly in a browser where you are NOT logged in.\n3. Observe that the application displays restricted data instead of redirecting to login.",
                         "url": url,
-                        "manual_poc": f"Open {url} in an Incognito window.",
+                        "manual_poc": f"Open {url} in an Incognito window and verify that it loads correctly.",
                         "remediation_steps": "Enforce strict server-side session validation for all sensitive routes."
                     })
         except:

@@ -24,6 +24,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
   const [isRunning, setIsRunning] = useState(false);
   const [missionGoal, setMissionGoal] = useState("Find and verify high-severity vulnerabilities.");
   const [error, setError] = useState<string | null>(null);
+  const [expandedFindings, setExpandedFindings] = useState<Set<string>>(new Set());
   const ws = useRef<WebSocket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +43,15 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
         timestamp: new Date().toLocaleTimeString([], { hour12: false }),
       },
     ]);
+  };
+
+  const toggleFinding = (id: string) => {
+    setExpandedFindings((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const startMission = () => {
@@ -149,18 +159,158 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
                 </div>
               </div>
             ) : ev.type === "finding" ? (
-              <div className="bg-gradient-to-br from-red-500/10 to-orange-500/10 border border-red-500/30 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                    <span className="text-xs font-black uppercase tracking-widest text-red-500">Critical Finding Verified</span>
+              <div
+                className={`group/card bg-gradient-to-br border rounded-2xl p-4 transition-all duration-500 overflow-hidden ${
+                  ev.payload?.severity === "Critical"
+                    ? "from-red-500/20 to-red-600/5 border-red-500/40 shadow-lg shadow-red-500/10"
+                    : ev.payload?.severity === "High"
+                    ? "from-orange-500/15 to-orange-600/5 border-orange-500/30 shadow-md shadow-orange-500/5"
+                    : ev.payload?.severity === "Medium"
+                    ? "from-yellow-500/10 to-yellow-600/5 border-yellow-500/20"
+                    : "from-blue-500/10 to-blue-600/5 border-blue-500/20"
+                }`}
+              >
+                {/* Finding Header */}
+                <div
+                  className="flex items-center justify-between cursor-pointer select-none"
+                  onClick={() => toggleFinding(ev.id)}
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-inner ${
+                        ev.payload?.severity === "Critical"
+                          ? "bg-red-500 text-white"
+                          : ev.payload?.severity === "High"
+                          ? "bg-orange-500 text-white"
+                          : ev.payload?.severity === "Medium"
+                          ? "bg-yellow-500 text-neutral-900"
+                          : "bg-blue-500 text-white"
+                      }`}
+                    >
+                      {ev.payload?.severity || "Warning"}
+                    </div>
+                    <h4 className="text-base font-bold text-white tracking-tight group-hover/card:text-red-400 transition-colors">
+                      {ev.payload?.vulnerability_type}
+                    </h4>
                   </div>
-                  <span className="text-[10px] text-neutral-500">{ev.timestamp}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-neutral-500 font-mono tracking-tighter opacity-70">
+                      {ev.timestamp}
+                    </span>
+                    <div
+                      className={`p-1 rounded-full bg-white/5 border border-white/5 transition-transform duration-500 ${
+                        expandedFindings.has(ev.id) ? "rotate-180" : ""
+                      }`}
+                    >
+                      <svg className="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="text-lg font-bold text-white">{ev.payload?.vulnerability_type}</h4>
-                  <p className="text-sm text-neutral-300 mt-1">{ev.payload?.explanation}</p>
-                </div>
+
+                {/* Impact Preview */}
+                {!expandedFindings.has(ev.id) && (
+                  <div className="mt-3 text-sm text-neutral-400 line-clamp-2 animate-in fade-in duration-500 pl-1 border-l-2 border-white/5 ml-1">
+                    {ev.payload?.explanation}
+                  </div>
+                )}
+
+                {/* Expanded Details */}
+                {expandedFindings.has(ev.id) && (
+                  <div className="mt-5 space-y-5 animate-in fade-in slide-in-from-top-4 duration-700">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Left Column: Description & Impact */}
+                      <div className="space-y-4">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-neutral-500">
+                            <div className="w-1.5 h-1.5 rounded-full bg-white/20" />
+                            Discovery Detail
+                          </div>
+                          <p className="text-sm text-neutral-200 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/5">
+                            {ev.payload?.explanation}
+                          </p>
+                        </div>
+                        {ev.payload?.impact && (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-red-400/80">
+                              <div className="w-1.5 h-1.5 rounded-full bg-red-400/50" />
+                              Critical Impact
+                            </div>
+                            <p className="text-sm text-neutral-300 leading-relaxed italic bg-red-500/5 p-3 rounded-xl border border-red-500/10">
+                              {ev.payload.impact}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right Column: Exploit & PoC */}
+                      <div className="space-y-4">
+                        {ev.payload?.exploit_scenario && (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-orange-400/80">
+                              <div className="w-1.5 h-1.5 rounded-full bg-orange-400/50" />
+                              Attack Scenario
+                            </div>
+                            <p className="text-xs text-neutral-400 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/5">
+                              {ev.payload.exploit_scenario}
+                            </p>
+                          </div>
+                        )}
+                        {ev.payload?.manual_poc && (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-teal-400/80">
+                              <div className="w-1.5 h-1.5 rounded-full bg-teal-400/50" />
+                              Proof of Concept (PoC)
+                            </div>
+                            <div className="group/code relative">
+                              <pre className="bg-neutral-950/90 p-4 rounded-xl text-[11px] font-mono text-emerald-400 overflow-x-auto border border-emerald-500/20 max-h-[150px] scrollbar-thin scrollbar-thumb-white/10">
+                                {ev.payload.manual_poc}
+                              </pre>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigator.clipboard.writeText(ev.payload.manual_poc);
+                                }}
+                                className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/10 opacity-0 group-hover/code:opacity-100 transition-opacity hover:bg-emerald-500/20 text-emerald-400"
+                                title="Copy PoC"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
+                                  />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Footer Actions: Remediation */}
+                    {ev.payload?.remediation_steps && (
+                      <div className="pt-4 border-t border-white/5 space-y-2">
+                        <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-blue-400/80">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={3}
+                              d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.040L3 6.247a13.438 13.438 0 001.259 20.835 11.954 11.954 0 0017.482 0A13.438 13.438 0 0021 6.247l-.382-.719z"
+                            />
+                          </svg>
+                          Remediation Advice
+                        </div>
+                        <p className="text-sm text-neutral-300 bg-blue-500/5 p-4 rounded-xl border border-blue-500/20 border-dashed">
+                          {ev.payload.remediation_steps}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex items-center gap-3 text-neutral-500">

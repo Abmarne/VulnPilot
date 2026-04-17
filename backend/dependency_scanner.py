@@ -139,28 +139,33 @@ class DependencyScanner:
         Dependencies: {json.dumps(dependencies)}
 
         --- TASK ---
-        Identify any dependencies with KNOWN security vulnerabilities (CVEs) or major security risks in these versions.
-        For each finding, provide:
-        1. Library Name
-        2. Version
-        3. Severity (High, Medium, Low, Critical)
-        4. Explanation of the risk/CVE.
-        5. Recommendation (e.g., upgrade to version X).
+         Identify any dependencies with KNOWN security vulnerabilities (CVEs) or major security risks.
+         For each, provide:
+         - name: (library name)
+         - version: (current version)
+         - severity: (Critical, High, Medium, Low)
+         - explanation: (why it's vulnerable)
+         - impact: (what can happen; how it causes a bug/vulnerability)
+         - exploit_scenario: (how an attacker might abuse this vulnerability)
+         - recommendation: (fix steps)
 
-        Return ONLY a JSON list of objects. No explanation.
-        """
+         Return ONLY a JSON list of objects.
+         """
         
         try:
             text = llm._call_llm(prompt)
             vulns = llm._parse_gemini_json(text)
             
             for v in vulns:
+                lib_name = v.get("name") or v.get("Library Name") or "Unknown"
                 self.findings.append({
-                    "vulnerability_type": f"Vulnerable Dependency ({v.get('Library Name') or v.get('library_name') or v.get('name', 'Unknown')})",
-                    "severity": v.get("Severity") or v.get("severity", "Medium"),
-                    "explanation": v.get("Explanation") or v.get("explanation", ""),
+                    "vulnerability_type": f"Vulnerable Dependency ({lib_name})",
+                    "severity": v.get("severity") or v.get("Severity") or "Medium",
+                    "explanation": v.get("explanation") or v.get("Explanation") or "",
+                    "impact": v.get("impact") or "Vulnerable dependencies can lead to RCE, Data Leakage, or DoS depending on the vulnerability.",
+                    "exploit_scenario": v.get("exploit_scenario") or "An attacker can exploit known CVEs in this library to compromise the application.",
                     "url": f"Manifest: {ecosystem}",
-                    "remediation_steps": v.get("Recommendation") or v.get("recommendation", "Update the library to the latest secure version.")
+                    "remediation_steps": v.get("recommendation") or v.get("Recommendation") or "Update the library to the latest secure version."
                 })
         except Exception as e:
             print(f"[!] SCA AI Check failed: {e}")

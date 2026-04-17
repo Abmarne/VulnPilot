@@ -24,7 +24,9 @@ def analyze_headers(url: str) -> List[Dict[str, Any]]:
                     "severity": "Medium" if header != "Referrer-Policy" else "Low",
                     "url": url,
                     "explanation": f"The '{header}' header is missing. {description}",
-                    "manual_poc": f"Run 'curl -I {url}' and check for the '{header}' header in the output.",
+                    "impact": f"Lack of {header} makes the application vulnerable to certain classes of web attacks like {header.replace('X-', '').replace('-Options', '')}.",
+                    "exploit_scenario": f"An attacker can exploit the absence of this header to perform attacks such as Clickjacking (if X-Frame-Options is missing) or Cross-Site Scripting (if CSP is missing).",
+                    "manual_poc": f"Run 'curl -I {url}' and observe that the '{header}' header is not present in the response.",
                     "poc_script": f"import requests\nr = requests.get('{url}')\nprint(f'{{ \"{header}\" in r.headers }}')"
                 })
         
@@ -36,6 +38,8 @@ def analyze_headers(url: str) -> List[Dict[str, Any]]:
                 "severity": "Low",
                 "url": url,
                 "explanation": f"The 'Server' header reveals the backend technology: {server}. This helps attackers target specific software versions.",
+                "impact": "Knowing the server version allows an attacker to search for specific exploits and vulnerabilities targeting that version.",
+                "exploit_scenario": f"1. Attacker sends a request to {url}.\n2. Attacker reads the 'Server' header.\n3. Attacker uses a database like Exploit-DB to find vulnerabilities for that specific server version.",
                 "manual_poc": f"Check the HTTP response headers for the 'Server' field.",
                 "poc_script": f"import requests\nr = requests.get('{url}')\nprint('Server:', r.headers.get('Server'))"
             })

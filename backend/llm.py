@@ -298,7 +298,23 @@ def generate_fuzzing_payloads(target_urls: List[str], schema_context: Dict[str, 
     return ["' OR 1=1 --", "<script>alert(1)</script>", "../../etc/passwd"]
 
 def identify_sinks(code_context: str, llm_config: Optional[Dict] = None) -> List[Dict[str, Any]]:
-    prompt = f"Analyze code for dangerous Sinks. Respond ONLY in JSON array of objects.\nSOURCE:\n{code_context}"
+    prompt = f"""
+    Analyze the following code for security Sinks, data leakage, and logic flaws.
+    For each discovery, provide a detailed finding object with:
+    - vulnerability_type: (string)
+    - severity: Critical, High, Medium, or Low (string)
+    - explanation: (string) Concise description of the line(s) involved.
+    - impact: (string) Explain EXACTLY how this causes a bug or security vulnerability. What is at risk?
+    - exploit_scenario: (string) Step-by-step of how to trigger this.
+    - manual_poc: (string) A curl command or python snippet that proves the bug.
+    - remediation_steps: (string) Actionable fix instructions.
+    - url_pattern: (string) The relative file path.
+    - required_context: (list of strings) Any other files needed to trace this.
+
+    Respond ONLY in JSON array format.
+    SOURCE:
+    {code_context}
+    """
     try:
         text = _call_llm(prompt, llm_config)
         sinks = _parse_gemini_json(text)
@@ -348,7 +364,21 @@ def analyze_anomalies(anomalies: List[Dict[str, Any]], llm_config: Optional[Dict
     results = []
     if not anomalies: return results
     for anomaly in anomalies:
-        prompt = f"Analyze DAST anomaly: {anomaly}\nRespond as JSON object."
+        prompt = f"""
+        Analyze this DAST anomaly discovered during security testing:
+        ANOMALY: {anomaly}
+
+        Provide a structured security finding including:
+        - vulnerability_type: (string)
+        - severity: Critical, High, Medium, or Low (string)
+        - explanation: (string) Why do you think this is a real vulnerability?
+        - impact: (string) What can happen if this is exploited?
+        - exploit_scenario: (string) How can an attacker use this anomaly?
+        - manual_poc: (string) The specific request/payload that triggers it.
+        - remediation_steps: (string) How to fix the underlying app.
+
+        Respond ONLY as a JSON object.
+        """
         try:
             text = _call_llm(prompt, llm_config)
             analysis = _parse_gemini_json(text)
