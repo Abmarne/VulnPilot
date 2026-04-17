@@ -96,7 +96,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
       <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800 bg-neutral-900/80">
         <div className="flex items-center gap-3">
           <div className={`w-3 h-3 rounded-full ${isRunning ? "bg-emerald-500 animate-pulse" : "bg-neutral-600"}`} />
-          <h2 className="text-lg font-black tracking-tighter text-emerald-400 uppercase">Mission Autopilot</h2>
+          <h2 className="text-lg font-black tracking-tighter text-emerald-400 uppercase">Security Consultant</h2>
         </div>
         <div className="flex items-center gap-4">
           <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
@@ -134,7 +134,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
               <div className="flex gap-4">
                 <div className="w-1 bg-emerald-500/30 rounded-full" />
                 <div className="flex-1 space-y-1">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-500/60">Reasoning</div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-500/60">Consultant Note</div>
                   <p className="text-sm text-neutral-200 leading-relaxed italic">{ev.message}</p>
                 </div>
               </div>
@@ -142,14 +142,9 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
               <div className="flex gap-4">
                 <div className="w-1 bg-teal-500/30 rounded-full" />
                 <div className="flex-1 space-y-1">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-teal-500/60">Execution</div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-teal-500/60">Activity</div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm text-teal-400 font-bold">{ev.message}</span>
-                    {ev.payload && (
-                      <span className="text-[10px] font-mono bg-neutral-800 text-neutral-400 px-1.5 py-0.5 rounded border border-neutral-700">
-                        {JSON.stringify(ev.payload)}
-                      </span>
-                    )}
                   </div>
                 </div>
               </div>
@@ -216,9 +211,9 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
-                <span>Mission in Progress</span>
+                <span>Audit in Progress</span>
               </div>
-            ) : "Engage Mission Autopilot"}
+            ) : "Start Security Audit"}
           </button>
         </div>
       </div>

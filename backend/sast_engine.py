@@ -12,7 +12,7 @@ class SastEngine:
         self.target_dir = os.path.abspath(codebase_path)
         
     def prepare_codebase(self) -> str:
-        """Clones if github, otherwise validates local path."""
+        """Clones if github, extracts if zip, otherwise validates local path."""
         if self.is_github:
             self.temp_dir = tempfile.mkdtemp(prefix="vulnpilot_sast_")
             print(f"[*] Cloning {self.raw_path} to {self.temp_dir}...")
@@ -23,6 +23,15 @@ class SastEngine:
                 print(f"[!] Error cloning repository: {e}")
                 return ""
         
+        # Zip handling
+        if self.raw_path.endswith(".zip") and os.path.exists(self.raw_path):
+             import zipfile
+             self.temp_dir = tempfile.mkdtemp(prefix="vulnpilot_zip_")
+             print(f"[*] Extracting ZIP {self.raw_path} to {self.temp_dir}...")
+             with zipfile.ZipFile(self.raw_path, 'r') as zip_ref:
+                 zip_ref.extractall(self.temp_dir)
+             self.target_dir = os.path.abspath(self.temp_dir)
+
         if not os.path.exists(self.target_dir):
             print(f"[!] Codebase path does not exist: {self.target_dir}")
             return ""
@@ -51,11 +60,11 @@ class SastEngine:
         if not self.target_dir:
             return code_context
             
-        extensions_to_scan = ['.tsx', '.ts', '.js', '.jsx', '.env', '.py']
+        extensions_to_scan = ['.tsx', '.ts', '.js', '.jsx', '.env', '.py', '.yml', '.yaml']
         # Always include package.json but never lock files (huge, no vulns)
-        include_filenames = {'package.json'}
+        include_filenames = {'package.json', 'requirements.txt', 'docker-compose.yml', 'Dockerfile'}
         exclude_filenames = {'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '.gitignore'}
-        max_files = 20
+        max_files = 15 # Reduced for speed
         files_scanned = 0
         
         print("[*] Extracting source files for SAST analysis...")

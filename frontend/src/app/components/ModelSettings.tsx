@@ -10,7 +10,7 @@ export type LLMConfig = {
 };
 
 const PROVIDERS = [
-  { id: "huggingface", name: "Hugging Face (Free)", isFree: true, defaultModel: "meta-llama/Llama-3.2-3B-Instruct" },
+  { id: "huggingface", name: "Hugging Face (Free)", isFree: true, defaultModel: "mistralai/Mistral-7B-Instruct-v0.3" },
   { id: "gemini", name: "Google Gemini", isFree: false, defaultModel: "gemini-2.0-flash" },
   { id: "groq", name: "Groq", isFree: false, defaultModel: "llama-3.3-70b-versatile" },
   { id: "openai", name: "OpenAI", isFree: false, defaultModel: "gpt-4o" },
@@ -26,8 +26,8 @@ export function ModelSettings({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [config, setConfig] = useState<LLMConfig>(initialConfig || {
-    provider: "huggingface",
-    model: "meta-llama/Llama-3.2-3B-Instruct",
+    provider: "groq",
+    model: "llama-3.1-8b-instant",
     api_key: ""
   });
 

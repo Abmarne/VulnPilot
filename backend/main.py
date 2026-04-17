@@ -10,7 +10,6 @@ from engine import ScannerEngine
 from profile_parser import parse_curl_command, parse_har_content, parse_openapi_content
 from profile_store import get_profile, list_profiles, save_profile
 from sast_engine import SastEngine
-from adversarial_engine import run_arena
 from autopilot import SecurityPilot
 import scan_store
 
@@ -277,35 +276,6 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
-@app.websocket("/api/arena/ws")
-async def arena_websocket(websocket: WebSocket):
-    """Adversarial Red vs Blue Arena - Honey-Patching WebSocket endpoint."""
-    await manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_text()
-            request_data = json.loads(data)
-
-            if request_data.get("type") == "START_ARENA":
-                finding = request_data.get("finding", {})
-                target = request_data.get("target")
-
-                async def arena_emit(event: str, payload: dict):
-                    await manager.send_personal_message(
-                        {"type": "arena_event", "event": event, **payload},
-                        websocket,
-                    )
-
-                result = await run_arena(finding=finding, target=target, emit=arena_emit)
-                await manager.send_personal_message(
-                    {"type": "arena_complete", "result": result},
-                    websocket,
-                )
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-    except Exception as exc:
-        await manager.send_personal_message({"type": "arena_error", "error": str(exc)}, websocket)
-        manager.disconnect(websocket)
 
 
 @app.websocket("/api/autopilot/ws")

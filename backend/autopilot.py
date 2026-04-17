@@ -67,7 +67,14 @@ class SecurityPilot:
             prompt = self._build_prompt(mission_goal)
             response = llm._call_llm(prompt, config=self.llm_config)
             
-            # Parse reasoning and action
+            # 1. Handle LLM Provider Errors (e.g. Rate Limits)
+            if response.startswith("Error:") or "rate limit" in response.lower() or "429" in response:
+                wait_time = 10 if ("429" in response or "rate limit" in response.lower()) else 3
+                await self._think(f"⚠️ Provider Alert: {response[:100]}... Pausing for {wait_time}s to recover.")
+                await asyncio.sleep(wait_time)
+                continue # Retry same step
+
+            # 2. Parse reasoning and action
             reasoning = self._extract_reasoning(response)
             action = self._extract_action(response)
             
@@ -75,6 +82,11 @@ class SecurityPilot:
                 await self._think(reasoning)
             
             if not action or action.get("tool") == "finish":
+                # If we have no action but also no error, the LLM might be confused.
+                if not reasoning and not action:
+                    await self._think("I'm having trouble formulating the next step. Re-evaluating...")
+                    await asyncio.sleep(2)
+                    continue
                 await self._think("Mission objective achieved or no further actions possible.")
                 break
                 
@@ -94,39 +106,82 @@ class SecurityPilot:
             })
             
             # await self._think(f"Observation from {tool_name}: {str(observation)[:500]}")
+            
+            # 3. Defensive Throttle (Stay within free-tier burst limits)
+            await asyncio.sleep(1)
+
+    def _get_summarized_state(self) -> str:
+        """Compresses the world model into a readable summary for the AI."""
+        endpoints = self.world_model.get("endpoints", [])
+        code_files = self.world_model.get("code_files", [])
+        summary = {
+            "current_stage": self.world_model.get("current_stage"),
+            "verified_findings_count": len(self.world_model.get("verified_findings", [])),
+            "discovery_summary": ""
+        }
+
+        # Summarize Endpoints
+        if len(endpoints) > 15:
+            # Group by first path segment
+            groups = {}
+            for e in endpoints:
+                url = e.get("url", "") if isinstance(e, dict) else str(e)
+                parts = url.strip("/").split("/")
+                prefix = f"/{parts[0]}" if parts[0] else "/"
+                groups[prefix] = groups.get(prefix, 0) + 1
+            
+            summary["discovery_summary"] = f"Found {len(endpoints)} total endpoints. Groups: " + \
+                ", ".join([f"{k} ({v} pages)" for k, v in sorted(groups.items(), key=lambda x: x[1], reverse=True)[:5]])
+            if len(groups) > 5: summary["discovery_summary"] += " ..."
+        else:
+            summary["endpoints"] = endpoints[:15]
+
+        # Summarize Code
+        if len(code_files) > 10:
+            summary["code_summary"] = f"Audited {len(code_files)} files so far."
+        else:
+            summary["code_files"] = code_files
+
+        return json.dumps(summary, indent=2)
 
     def _build_prompt(self, goal: str) -> str:
-        state_summary = json.dumps(self.world_model, indent=2)
+        state_summary = self._get_summarized_state()
         history_summary = ""
         for h in self.history[-5:]: # More history for better context
             history_summary += f"Step {h['step']} Thought: {h['thought']}\nStep {h['step']} Action: {h['action']['tool']}\nStep {h['step']} Observation: {str(h['observation'])[:300]}\n\n"
 
         return f"""
-You are the VulnPilot Security Autopilot, an elite autonomous security researcher.
-Your goal: {goal}
+You are the VulnPilot Security Consultant, a friendly and expert virtual security advisor.
+Your Goal: {goal}
 Target: {self.target}
 
-Available Tools:
-1. `recon_attack_surface(url)`: Crawls the target URL and finds endpoints.
-2. `read_code(path)`: Reads the content of a local file (only if target is a codebase).
-3. `analyze_sast(code_context)`: Identifies potential security sinks in code and returns potential vulnerabilities.
-4. `fuzz_endpoint(endpoint_data)`: Runs a fuzzer against a specific endpoint (needs a URL target).
-5. `verify_finding(finding_data)`: Uses an isolated sandbox to verify if a finding is truly exploitable. Requires `code` and `payload`.
-6. `finish()`: Use this when you have completed your mission.
+Mission instructions:
+- Speak in plain, non-technical English in your THOUGHT section.
+- Instead of "SCA", say "checking for outdated parts".
+- Instead of "SAST", say "auditing the code for mistakes".
+- Instead of "DAST" or "Fuzzing", say "testing how the app handles unexpected input".
+- Be professional, transparent, and reassuring.
 
-Current World Model:
+Available Actions:
+1. `recon_attack_surface(url)`: Map out the website's structure and public pages.
+2. `read_code(path)`: Review a specific file in the project.
+3. `analyze_sast(code_context)`: Perform a detailed code audit for security flaws.
+4. `fuzz_endpoint(endpoint_data)`: Run tests to see how the app reacts to unusual behavior.
+5. `verify_finding(finding_data)`: Double-check a potential issue to see if it is a real threat.
+6. `finish()`: End the audit and summarize the results.
+
+Current Progress:
 {state_summary}
 
-Recent History:
+Recent Activity:
 {history_summary}
 
 Rules:
-- You must always provide your "THOUGHT" followed by your "ACTION".
-- Output format:
-THOUGHT: <your reasoning about the next step>
-ACTION: {{"tool": "<tool_name>", "params": {{...}}}}
-
-Think step-by-step. Focus on critical vulnerabilities (SQLi, RCE, IDOR, XSS).
+- Always provide a "THOUGHT" in plain English.
+- Always provide an "ACTION" in valid JSON format.
+- Format:
+THOUGHT: <Clear, easy-to-understand explanation of what you are doing next>
+ACTION: {{"tool": "<action_name>", "params": {{...}}}}
 """
 
     def _extract_reasoning(self, text: str) -> str:
@@ -134,16 +189,39 @@ Think step-by-step. Focus on critical vulnerabilities (SQLi, RCE, IDOR, XSS).
         return match.group(1).strip() if match else ""
 
     def _extract_action(self, text: str) -> Optional[Dict]:
-        match = re.search(r"ACTION:\s*(\{.*\})", text, re.DOTALL | re.IGNORECASE)
+        """Robustly extracts JSON action even with conversational noise."""
+        if text.startswith("Error:") or "429" in text:
+            return None # Don't try to parse error strings as actions
+
+        # Look for the last JSON-like block in the text
+        pattern = r"ACTION:\s*(.*)"
+        match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+        if not match:
+            # Fallback: find any JSON block that looks like a tool call
+            match = re.search(r'(\{\s*"tool":\s*".*"\})', text, re.DOTALL)
+            
         if match:
             try:
-                # Clean up json if markdown formatted
-                json_str = match.group(1).strip()
-                if json_str.startswith("```"):
-                   json_str =  re.sub(r'^```(?:json)?', '', json_str).strip()
-                   json_str = re.sub(r'```$', '', json_str).strip()
-                return json.loads(json_str)
-            except:
+                raw_json = match.group(0 if "ACTION:" not in text.upper() else 1).strip()
+                # Clean markdown blocks
+                if "```" in raw_json:
+                    raw_json = re.sub(r"```(?:json)?", "", raw_json).strip()
+                    raw_json = re.sub(r"```", "", raw_json).strip()
+                
+                # Ensure we start at the first {
+                if "{" in raw_json:
+                    raw_json = raw_json[raw_json.find("{"):]
+                # Ensure we end at the last }
+                if "}" in raw_json:
+                    raw_json = raw_json[:raw_json.rfind("}")+1]
+                
+                parsed = json.loads(raw_json)
+                # Validation: must have 'tool'
+                if isinstance(parsed, dict) and "tool" in parsed:
+                    return parsed
+                return None
+            except Exception as e:
+                print(f"[!] JSON Parse Error: {e} | Raw: {text[:100]}...")
                 return None
         return None
 

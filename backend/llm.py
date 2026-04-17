@@ -22,23 +22,59 @@ Anthropic = _load_attr("anthropic", "Anthropic")
 InferenceClient = _load_attr("huggingface_hub", "InferenceClient")
 
 if load_dotenv is not None:
-    load_dotenv()
+    # Try multiple common locations
+    candidates = [
+        ".env",
+        "backend/.env",
+        os.path.join(os.path.dirname(__file__), ".env"),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            print(f"[LLM] Found .env at: {os.path.abspath(path)}")
+            load_dotenv(path)
+            if os.environ.get("HF_API_KEY") or os.environ.get("GROQ_API_KEY"):
+                break
 
-# Defaults from ENV if present
-DEFAULT_CONFIG = {
-    "provider": "huggingface",
-    "model": "meta-llama/Llama-3.2-3B-Instruct",
-    "api_key": os.environ.get("HF_API_KEY", "")
-}
+# Manual fallback parser if dotenv is missing or failing
+if not os.environ.get("HF_API_KEY"):
+    for path in [".env", "backend/.env", os.path.join(os.path.dirname(__file__), ".env")]:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    for line in f:
+                        if '=' in line and not line.startswith('#'):
+                            k, v = line.strip().split('=', 1)
+                            os.environ[k.strip()] = v.strip().strip('"').strip("'")
+            except: pass
+
+# ── Dynamic Provider Fallback logic ──────────────────────────────────────────
+
+def get_best_default_provider() -> Dict[str, str]:
+    """Determines the best provider based on available environment variables.
+    Priority: Groq (Recommended) -> HuggingFace (Free Fallback)
+    """
+    if os.environ.get("GROQ_API_KEY"):
+        return {
+            "provider": "groq", 
+            "model": "llama-3.1-8b-instant", 
+            "api_key": os.environ["GROQ_API_KEY"]
+        }
+    return {
+        "provider": "huggingface",
+        "model": "meta-llama/Llama-3.2-3B-Instruct",
+        "api_key": os.environ.get("HF_API_KEY", "")
+    }
+
+print(f"[LLM] Initializing provider registry. Fallback mode: {'Base (HF/Groq)'}")
 
 def _call_huggingface(prompt: str, api_key: str, model: str) -> str:
     """Default free provider fallback."""
     try:
         if not api_key:
-            # Try public inference if no key (limited)
-            client = InferenceClient(model)
+            client = InferenceClient(model or "meta-llama/Llama-3.2-3B-Instruct")
         else:
-            client = InferenceClient(model, token=api_key)
+            client = InferenceClient(model or "meta-llama/Llama-3.2-3B-Instruct", token=api_key)
         
         response = ""
         for message in client.chat_completion(
@@ -50,7 +86,7 @@ def _call_huggingface(prompt: str, api_key: str, model: str) -> str:
         return response
     except Exception as e:
         print(f"[!] Hugging Face failure: {e}")
-        return ""
+        return f"Error: {e}"
 
 def _call_gemini_dynamic(prompt: str, api_key: str, model: str) -> str:
     if not genai: return "Error: google-genai not installed"
@@ -60,22 +96,29 @@ def _call_gemini_dynamic(prompt: str, api_key: str, model: str) -> str:
             model=model or "gemini-2.0-flash",
             contents=prompt
         )
-        return response.text or ""
+        return response.text or "Error: Empty response from Gemini"
     except Exception as e:
         return f"Error: {e}"
 
 def _call_groq_dynamic(prompt: str, api_key: str, model: str) -> str:
     if not Groq: return "Error: groq not installed"
-    try:
-        client = Groq(api_key=api_key)
-        response = client.chat.completions.create(
-            model=model or "llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-        )
-        return response.choices[0].message.content or ""
-    except Exception as e:
-        return f"Error: {e}"
+    for attempt in range(2):
+        try:
+            client = Groq(api_key=api_key)
+            response = client.chat.completions.create(
+                model=model or "llama-3.1-8b-instant",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+            )
+            return response.choices[0].message.content or ""
+        except Exception as e:
+            err_msg = str(e)
+            if "429" in err_msg or "rate_limit" in err_msg.lower():
+                print(f"[LLM] Groq Rate Limit (429). Waiting 5s (Attempt {attempt+1})...")
+                time.sleep(5)
+                continue
+            return f"Error: {e}"
+    return "Error: Groq Rate Limit exceeded after retries."
 
 def _call_openai_dynamic(prompt: str, api_key: str, model: str) -> str:
     if not OpenAI: return "Error: openai not installed"
@@ -103,27 +146,80 @@ def _call_anthropic_dynamic(prompt: str, api_key: str, model: str) -> str:
         return f"Error: {e}"
 
 def _call_llm(prompt: str, config: Optional[Dict] = None) -> str:
-    """Dispatches call to appropriate provider based on config."""
-    cfg = config or DEFAULT_CONFIG
-    provider = cfg.get("provider", "huggingface").lower()
+    """Dispatches call to appropriate provider based on config with automated fallback.
+    Hierarchy: 
+    1. config['api_key'] (UI Entry)
+    2. Env Variable for config['provider']
+    3. Global Default (get_best_default_provider)
+    """
+    cfg = config or {}
+    provider = cfg.get("provider", "").lower()
     api_key = cfg.get("api_key", "")
     model = cfg.get("model", "")
 
-    print(f"[LLM] Calling {provider} ({model or 'default'})...")
-
-    if provider == "huggingface":
-        return _call_huggingface(prompt, api_key, model or "meta-llama/Llama-3.2-3B-Instruct")
-    elif provider == "gemini":
-        return _call_gemini_dynamic(prompt, api_key, model)
-    elif provider == "groq":
-        return _call_groq_dynamic(prompt, api_key, model)
-    elif provider == "openai":
-        return _call_openai_dynamic(prompt, api_key, model)
-    elif provider == "anthropic":
-        return _call_anthropic_dynamic(prompt, api_key, model)
+    # 1. Resolve API Key & Provider
+    if not provider:
+        default_cfg = get_best_default_provider()
+        provider = default_cfg["provider"]
+        api_key = api_key or default_cfg["api_key"]
+        model = model or default_cfg["model"]
     
-    # Final Fallback
-    return _call_huggingface(prompt, os.environ.get("HF_API_KEY", ""), "meta-llama/Llama-3.2-3B-Instruct")
+    # 2. If no key was provided in UI, look in Environment
+    if not api_key:
+        env_map = {
+            "gemini": "GOOGLE_API_KEY",
+            "groq": "GROQ_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "huggingface": "HF_API_KEY"
+        }
+        env_key_name = env_map.get(provider)
+        if env_key_name:
+            api_key = os.environ.get(env_key_name, "")
+
+    # 3. Model Correction (Safe Defaults)
+    if provider == "huggingface" and (not model or "Mistral" in model or "zephyr" in model.lower()):
+        model = "meta-llama/Llama-3.2-3B-Instruct" # Vastly more reliable chat support
+
+    # 4. Final Fallback check
+    if not api_key:
+        print(f"[LLM] Warning: No key for {provider}. Falling back to system default...")
+        default_cfg = get_best_default_provider()
+        if default_cfg["provider"] != provider:
+            return _call_llm(prompt, default_cfg)
+
+    # 5. Execute
+    result = ""
+    try:
+        if provider == "huggingface":
+            result = _call_huggingface(prompt, api_key, model)
+        elif provider == "gemini":
+            result = _call_gemini_dynamic(prompt, api_key, model)
+        elif provider == "groq":
+            result = _call_groq_dynamic(prompt, api_key, model)
+        elif provider == "openai":
+            result = _call_openai_dynamic(prompt, api_key, model)
+        elif provider == "anthropic":
+            result = _call_anthropic_dynamic(prompt, api_key, model)
+        else:
+            result = _call_huggingface(prompt, os.environ.get("HF_API_KEY", ""), "meta-llama/Llama-3.2-3B-Instruct")
+    except Exception as e:
+        print(f"[LLM] Dispatcher Critical Error in {provider}: {e}")
+        result = f"Error: {e}"
+
+    # Automated Fallback: If configured provider fails (and it wasn't a 429), try the system default
+    if result.startswith("Error:") and config is not None:
+        if "429" in result or "rate limit" in result.lower():
+            # If Groq is rate limited even after retries, try Hugging Face as a last ditch
+            if provider == "groq" and os.environ.get("HF_API_KEY"):
+                 print("[LLM] Groq hard rate-limit. Switching to HuggingFace fallback.")
+                 return _call_llm(prompt, {"provider": "huggingface"})
+            return result
+        
+        print(f"[LLM] {provider} failed ({result[:50]}...). Retrying with system default...")
+        return _call_llm(prompt, None) # retry with get_best_default_provider()
+    
+    return result
 
 def autopilot_reasoning(prompt: str, config: Optional[Dict] = None) -> str:
     return _call_llm(prompt, config)
