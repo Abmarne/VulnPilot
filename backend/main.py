@@ -11,6 +11,7 @@ from profile_parser import parse_curl_command, parse_har_content, parse_openapi_
 from profile_store import get_profile, list_profiles, save_profile
 from sast_engine import SastEngine
 from adversarial_engine import run_arena
+from autopilot import SecurityPilot
 import scan_store
 
 
@@ -300,6 +301,47 @@ async def arena_websocket(websocket: WebSocket):
         manager.disconnect(websocket)
     except Exception as exc:
         await manager.send_personal_message({"type": "arena_error", "error": str(exc)}, websocket)
+        manager.disconnect(websocket)
+
+
+@app.websocket("/api/autopilot/ws")
+async def autopilot_websocket(websocket: WebSocket):
+    """Autonomous Security Pilot WebSocket endpoint."""
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            request_data = json.loads(data)
+
+            if request_data.get("type") == "START_MISSION":
+                target = request_data.get("target", "")
+                goal = request_data.get("goal", "Find and verify vulnerabilities.")
+                session_cookie = request_data.get("session_cookie", None)
+
+                async def handle_thought(text: str):
+                    await manager.send_personal_message({"type": "thought", "message": text}, websocket)
+
+                async def handle_action(tool: str, params: Any):
+                    await manager.send_personal_message({"type": "action", "tool": tool, "params": params}, websocket)
+
+                async def handle_finding(finding: Dict[str, Any]):
+                    await manager.send_personal_message({"type": "finding", "data": finding}, websocket)
+
+                pilot = SecurityPilot(
+                    target=target,
+                    session_cookie=session_cookie,
+                    on_thought=handle_thought,
+                    on_action=handle_action,
+                    on_finding=handle_finding
+                )
+                
+                await pilot.run(mission_goal=goal)
+                await manager.send_personal_message({"type": "mission_complete"}, websocket)
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as exc:
+        await manager.send_personal_message({"type": "autopilot_error", "error": str(exc)}, websocket)
         manager.disconnect(websocket)
 
 

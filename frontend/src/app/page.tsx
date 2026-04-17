@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ArenaModal } from "./components/ArenaModal";
+import { MissionConsole } from "./components/MissionConsole";
 
 const API_BASE = "http://localhost:8000";
 const WS_URL = "ws://localhost:8000/api/scan/ws";
@@ -68,6 +69,7 @@ export default function Home() {
   const [saveHistory, setSaveHistory] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [pastScans, setPastScans] = useState<any[]>([]);
+  const [showAutopilot, setShowAutopilot] = useState(false);
 
   const ws = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -343,43 +345,29 @@ export default function Home() {
               Save session to local history (Opt-in)
             </label>
           </div>
-          <button type="submit" disabled={loading} className="w-full rounded bg-emerald-500 px-4 py-3 text-sm font-black uppercase tracking-widest text-neutral-950 disabled:opacity-50">
-            {loading ? "Scanning..." : "Launch Real-time Scan"}
-          </button>
           {errorInfo && <div className="rounded border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{errorInfo}</div>}
+          
+          <div className="flex items-center gap-4 pt-2">
+            <button 
+              type="button"
+              onClick={() => setShowAutopilot(true)}
+              className="flex-1 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-4 text-xs font-black uppercase tracking-widest text-emerald-400 hover:bg-emerald-500/20 transition-all"
+            >
+              🚀 Engage AI Autopilot
+            </button>
+            <button type="submit" disabled={loading} className="flex-[2] rounded-xl bg-emerald-500 px-4 py-4 text-sm font-black uppercase tracking-widest text-neutral-950 disabled:opacity-50">
+              {loading ? "Scanning..." : "Launch Parallel Passive Scan"}
+            </button>
+          </div>
         </form>
 
-        {(loading || logs.length > 0) && (
-          <section className="grid gap-6 lg:grid-cols-3">
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6">
-              <h3 className="mb-4 text-xs font-bold uppercase tracking-widest text-neutral-500">Mission Progress</h3>
-              <div className="space-y-3">
-                {stages.filter((stage) => stage !== "complete").map((stage, index) => (
-                  <div key={`stage-${stage}`} className="flex items-center gap-3">
-                    <div className={`flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-bold ${stageClass(stage)}`}>{index + 1}</div>
-                    <div className="flex-1">
-                      <div className="text-[10px] uppercase tracking-widest text-neutral-400">{stage}</div>
-                      <div className="mt-1 h-1 rounded bg-neutral-950">
-                        <div className="h-1 rounded bg-emerald-500" style={{ width: progress.stage === stage ? `${progress.percent}%` : stageClass(stage).includes("bg-emerald-500") ? "100%" : "0%" }} />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="lg:col-span-2 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-4">
-              <div className="mb-3 text-xs font-bold uppercase tracking-widest text-neutral-500">engine_output.log</div>
-              <div className="h-80 space-y-1 overflow-y-auto rounded border border-neutral-800 bg-neutral-950 p-3 font-mono text-xs">
-                {logs.map((log, index) => (
-                  <div key={`log-${index}`} className={log.message.startsWith("[!]") ? "text-red-400" : log.message.startsWith("[*]") ? "text-emerald-400" : "text-neutral-300"}>
-                    [{new Date().toLocaleTimeString([], { hour12: false })}] {log.message}
-                  </div>
-                ))}
-                <div ref={terminalEndRef} />
-              </div>
-            </div>
+        {showAutopilot && (
+          <section className="h-[700px] animate-in fade-in zoom-in-95 duration-500">
+            <MissionConsole target={target} sessionCookie={sessionCookie} onClose={() => setShowAutopilot(false)} />
           </section>
         )}
+
+        {/* Old War Room removed as per user feedback */}
 
         {findings.length > 0 && (
           <section className="space-y-6">

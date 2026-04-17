@@ -71,6 +71,11 @@ def _call_llm(prompt: str) -> str:
     
     raise Exception("All LLM providers failed.")
 
+def autopilot_reasoning(prompt: str) -> str:
+    """Specialized call for Autopilot reasoning to ensure high-quality ReAct output."""
+    # We use the same _call_llm but could easily swap to a 'smarter' model here if needed.
+    return _call_llm(prompt)
+
 # Alias for backward compat
 _call_gemini = _call_llm
 
