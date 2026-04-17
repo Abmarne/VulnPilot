@@ -16,9 +16,10 @@ type MissionConsoleProps = {
   target: string;
   sessionCookie?: string;
   onClose?: () => void;
+  llmConfig?: import("./ModelSettings").LLMConfig;
 };
 
-export function MissionConsole({ target, sessionCookie, onClose }: MissionConsoleProps) {
+export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: MissionConsoleProps) {
   const [events, setEvents] = useState<MissionEvent[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [missionGoal, setMissionGoal] = useState("Find and verify high-severity vulnerabilities.");
@@ -60,7 +61,8 @@ export function MissionConsole({ target, sessionCookie, onClose }: MissionConsol
         type: "START_MISSION", 
         target, 
         goal: missionGoal, 
-        session_cookie: sessionCookie 
+        session_cookie: sessionCookie,
+        llm_config: llmConfig
       }));
     };
 

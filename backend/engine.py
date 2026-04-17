@@ -22,6 +22,7 @@ class ScannerEngine:
         on_log: Optional[Callable[[str, str], Awaitable[None]]] = None,
         on_progress: Optional[Callable[[str, int], Awaitable[None]]] = None,
         on_finding: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+        llm_config: Optional[Dict[str, Any]] = None,
     ):
         self.target = target
         self.session_cookie = session_cookie
@@ -30,6 +31,7 @@ class ScannerEngine:
         self.on_log = on_log
         self.on_progress = on_progress
         self.on_finding = on_finding
+        self.llm_config = llm_config
         self.all_findings: List[Dict[str, Any]] = []
 
     async def _emit_log(self, text: str, stage: str = "general"):
@@ -157,7 +159,7 @@ class ScannerEngine:
                     if not js_content:
                         continue
 
-                    for endpoint in llm.reconstruct_api_schema(js_content):
+                    for endpoint in llm.reconstruct_api_schema(js_content, llm_config=self.llm_config):
                         endpoint_url = endpoint.get("url", "")
                         if not endpoint_url:
                             continue
@@ -200,7 +202,7 @@ class ScannerEngine:
             if prepared_path:
                 code_context = sast.extract_critical_files()
                 await self._emit_log("[*] SAST: Running AI Sink Analysis...", "sast")
-                guided_insights = llm.identify_sinks(code_context)
+                guided_insights = llm.identify_sinks(code_context, llm_config=self.llm_config)
                 await self._emit_log(f"[*] SAST: Found {len(guided_insights)} potential code sinks.", "sast")
 
                 for sink in guided_insights:
@@ -221,7 +223,7 @@ class ScannerEngine:
                         await self._emit_log(f"  [>] Fetched context: {dep_path}", "sast")
 
                     if extra_code:
-                        verdict = llm.deep_taint_audit(sink, extra_code)
+                        verdict = llm.deep_taint_audit(sink, extra_code, llm_config=self.llm_config)
                         if verdict:
                             sink.update(verdict)
                             if verdict.get("verdict") == "False Positive":
@@ -261,7 +263,7 @@ class ScannerEngine:
             }
 
             await self._emit_log(f"[*] DAST: Starting fuzzer against {target_url}...", "dast")
-            fuzzer = Fuzzer(endpoints, self.session_cookie, guided_insights, schema_context_list)
+            fuzzer = Fuzzer(endpoints, self.session_cookie, guided_insights, schema_context_list, llm_config=self.llm_config)
             raw_anomalies = fuzzer.run_fuzzer(base_url=target_url)
             await self._emit_log(f"[*] DAST: Fuzzer found {len(raw_anomalies)} anomalies.", "dast")
 
@@ -277,7 +279,7 @@ class ScannerEngine:
         await self._emit_progress("analysis", 85)
 
         await self._emit_log("[*] Finalizing Hybrid Analysis with Gemini...", "analysis")
-        for finding in llm.analyze_hybrid(raw_anomalies, code_context):
+        for finding in llm.analyze_hybrid(raw_anomalies, code_context, llm_config=self.llm_config):
             await self._emit_finding(finding)
 
         await self._emit_progress("complete", 100)
@@ -321,7 +323,7 @@ class ScannerEngine:
             return False
 
         await self._emit_log(f"[*] Starting AI-powered refactor for {rel_path}...", "analysis")
-        refactored_code = llm.get_refactored_file(original_code, finding)
+        refactored_code = llm.get_refactored_file(original_code, finding, llm_config=self.llm_config)
 
         if refactored_code and sast.write_file_content(rel_path, refactored_code):
             sast.cleanup()

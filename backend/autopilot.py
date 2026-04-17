@@ -23,12 +23,14 @@ class SecurityPilot:
         on_thought: Optional[Callable[[str], Awaitable[None]]] = None,
         on_action: Optional[Callable[[str, Any], Awaitable[None]]] = None,
         on_finding: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+        llm_config: Optional[Dict[str, Any]] = None,
     ):
         self.target = target
         self.session_cookie = session_cookie
         self.on_thought = on_thought
         self.on_action = on_action
         self.on_finding = on_finding
+        self.llm_config = llm_config
         
         self.world_model = {
             "endpoints": [],
@@ -63,7 +65,7 @@ class SecurityPilot:
         
         for step in range(self.max_steps):
             prompt = self._build_prompt(mission_goal)
-            response = llm._call_llm(prompt)
+            response = llm._call_llm(prompt, config=self.llm_config)
             
             # Parse reasoning and action
             reasoning = self._extract_reasoning(response)
@@ -167,7 +169,7 @@ Think step-by-step. Focus on critical vulnerabilities (SQLi, RCE, IDOR, XSS).
 
             elif tool_name == "analyze_sast":
                 context = params.get("code_context")
-                sinks = llm.identify_sinks(context)
+                sinks = llm.identify_sinks(context, llm_config=self.llm_config)
                 for sink in sinks:
                     if self.on_finding:
                         await self.on_finding(sink)
@@ -179,10 +181,10 @@ Think step-by-step. Focus on critical vulnerabilities (SQLi, RCE, IDOR, XSS).
                 endpoint = params.get("endpoint_data")
                 if not endpoint or not self.is_url: return "Error: Invalid target or endpoint."
                 
-                fuzzer = Fuzzer([endpoint], self.session_cookie, [], {})
+                fuzzer = Fuzzer([endpoint], self.session_cookie, [], {}, llm_config=self.llm_config)
                 anomalies = fuzzer.run_fuzzer(base_url=self.target)
                 
-                analyzed = llm.analyze_anomalies(anomalies)
+                analyzed = llm.analyze_anomalies(anomalies, llm_config=self.llm_config)
                 for finding in analyzed:
                     if self.on_finding:
                         await self.on_finding(finding)

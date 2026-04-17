@@ -12,17 +12,18 @@ import llm
 
 
 class Fuzzer:
-    def __init__(self, targets: List[Dict[str, Any]], session_cookie: str = None, guided_insights: List[Dict[str, Any]] = None, schema_context: Dict[str, Any] = None):
+    def __init__(self, targets: List[Dict[str, Any]], session_cookie: str = None, guided_insights: List[Dict[str, Any]] = None, schema_context: Dict[str, Any] = None, llm_config: Optional[Dict[str, Any]] = None):
         self.targets = targets
         self.guided_insights = guided_insights or []
         self.session = requests.Session()
         self.schema_context = schema_context or {}
+        self.llm_config = llm_config
 
         if session_cookie:
             self.session.headers.update({"Cookie": session_cookie})
 
         sample_urls = [target["url"] for target in self.targets[:5]] if self.targets else []
-        self.payloads = llm.generate_fuzzing_payloads(sample_urls, self.schema_context)
+        self.payloads = llm.generate_fuzzing_payloads(sample_urls, self.schema_context, llm_config=self.llm_config)
         print(f"[*] Loaded {len(self.payloads)} custom schema-adapted testing payloads from LLM.")
         if self.guided_insights:
             print(f"[*] Fuzzer is ARMED with {len(self.guided_insights)} guided insights from SAST.")
@@ -172,7 +173,7 @@ class Fuzzer:
             vuln_type = relevant_insights[0].get("vulnerability_type", "unknown")
             target_payloads.extend(self._get_specialized_payloads(vuln_type))
             print(f"[*] Generating Bespoke AI payloads for {vuln_type} on {param_name}...")
-            bespoke = llm.generate_bespoke_payloads(relevant_insights[0])
+            bespoke = llm.generate_bespoke_payloads(relevant_insights[0], llm_config=self.llm_config)
             if bespoke:
                 target_payloads.extend(bespoke)
         return self._dedupe_payloads(target_payloads)

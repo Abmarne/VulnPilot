@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ArenaModal } from "./components/ArenaModal";
 import { MissionConsole } from "./components/MissionConsole";
+import { ModelSettings, LLMConfig } from "./components/ModelSettings";
 
 const API_BASE = "http://localhost:8000";
 const WS_URL = "ws://localhost:8000/api/scan/ws";
@@ -56,7 +57,32 @@ export default function Home() {
   const [progress, setProgress] = useState<ProgressState>({ stage: "init", percent: 0 });
   const [errorInfo, setErrorInfo] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
-  const [selectedProfileId, setSelectedProfileId] = useState("");
+  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
+
+  // LLM Dynamic Configuration
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>({
+    provider: "huggingface",
+    model: "meta-llama/Llama-3.2-3B-Instruct",
+    api_key: ""
+  });
+
+  // Load persistence
+  useEffect(() => {
+    const saved = localStorage.getItem("vp_llm_config");
+    if (saved) {
+      try {
+        setLlmConfig(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to load LLM config", e);
+      }
+    }
+  }, []);
+
+  const handleLlmConfigChange = (newConfig: LLMConfig) => {
+    setLlmConfig(newConfig);
+    localStorage.setItem("vp_llm_config", JSON.stringify(newConfig));
+  };
+
   const [useProfileRequests, setUseProfileRequests] = useState(true);
   const [harFile, setHarFile] = useState<File | null>(null);
   const [curlCommand, setCurlCommand] = useState("");
@@ -82,7 +108,7 @@ export default function Home() {
   useEffect(() => {
     if (!target.trim()) {
       setProfiles([]);
-      setSelectedProfileId("");
+      setSelectedProfileId(null);
       return;
     }
     const timer = setTimeout(async () => {
@@ -97,20 +123,12 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [target]);
 
-  const stageClass = (stage: string) => {
-    const current = stages.indexOf(progress.stage);
-    const idx = stages.indexOf(stage);
-    if (idx < current || progress.stage === "complete") return "border-emerald-400 bg-emerald-500 text-neutral-950";
-    if (idx === current) return "border-emerald-500 text-emerald-400";
-    return "border-neutral-800 text-neutral-500";
-  };
-
   const refreshProfiles = async () => {
     if (!target.trim()) return;
     const response = await fetch(`${API_BASE}/api/profiles?target=${encodeURIComponent(target.trim())}`);
     const data = (await response.json()) as { profiles: ProfileSummary[] };
     setProfiles(data.profiles || []);
-    if ((data.profiles || []).length > 0) setSelectedProfileId(String(data.profiles[0].id));
+    if ((data.profiles || []).length > 0) setSelectedProfileId(data.profiles[0].id);
   };
 
   const startScan = (event: FormEvent) => {
@@ -132,9 +150,10 @@ export default function Home() {
         type: "START_SCAN",
         target,
         session_cookie: sessionCookie || null,
-        profile_id: selectedProfileId ? Number(selectedProfileId) : null,
+        profile_id: selectedProfileId,
         use_profile_requests: useProfileRequests && !!selectedProfileId,
         save_history: saveHistory,
+        llm_config: llmConfig
       }));
     };
 
@@ -295,12 +314,15 @@ export default function Home() {
             <h1 className="text-6xl font-black tracking-tighter text-emerald-400">VulnPilot</h1>
             <p className="text-neutral-400 text-sm">Real-time hybrid security analysis with authenticated attack profiles.</p>
           </div>
-          <button 
-            onClick={() => setHistoryOpen(true)}
-            className="flex items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-2 text-xs font-bold uppercase tracking-widest text-neutral-400 hover:bg-neutral-800 transition-colors"
-          >
-            Mission History {pastScans.length > 0 && <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] text-emerald-400">{pastScans.length}</span>}
-          </button>
+          <div className="flex items-center gap-4">
+            <ModelSettings onConfigChange={handleLlmConfigChange} initialConfig={llmConfig} />
+            <button 
+              onClick={() => setHistoryOpen(true)}
+              className="flex items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-2 text-xs font-bold uppercase tracking-widest text-neutral-400 hover:bg-neutral-800 transition-colors"
+            >
+              Mission History {pastScans.length > 0 && <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] text-emerald-400">{pastScans.length}</span>}
+            </button>
+          </div>
         </header>
 
         <section className="grid gap-6 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6 xl:grid-cols-3">
@@ -328,7 +350,7 @@ export default function Home() {
             <input value={sessionCookie} onChange={(event) => setSessionCookie(event.target.value)} placeholder="session=xyz... (optional)" className="rounded border border-neutral-800 bg-neutral-950 px-3 py-3 text-sm" />
           </div>
           <div className="grid gap-4 md:grid-cols-[2fr,1fr]">
-            <select value={selectedProfileId} onChange={(event) => setSelectedProfileId(event.target.value)} className="rounded border border-neutral-800 bg-neutral-950 px-3 py-3 text-sm">
+            <select value={selectedProfileId ?? ""} onChange={(event) => setSelectedProfileId(event.target.value ? Number(event.target.value) : null)} className="rounded border border-neutral-800 bg-neutral-950 px-3 py-3 text-sm">
               <option value="">No saved attack profile</option>
               {profiles.map((profile) => (
                 <option key={`profile-${profile.id}`} value={profile.id}>
@@ -363,11 +385,14 @@ export default function Home() {
 
         {showAutopilot && (
           <section className="h-[700px] animate-in fade-in zoom-in-95 duration-500">
-            <MissionConsole target={target} sessionCookie={sessionCookie} onClose={() => setShowAutopilot(false)} />
+            <MissionConsole 
+              target={target} 
+              sessionCookie={sessionCookie} 
+              llmConfig={llmConfig}
+              onClose={() => setShowAutopilot(false)} 
+            />
           </section>
         )}
-
-        {/* Old War Room removed as per user feedback */}
 
         {findings.length > 0 && (
           <section className="space-y-6">

@@ -218,6 +218,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 profile_id = request_data.get("profile_id")
                 use_profile_requests = bool(request_data.get("use_profile_requests", False))
                 save_history = bool(request_data.get("save_history", False))
+                llm_config = request_data.get("llm_config")
 
                 session_logs = []
 
@@ -233,6 +234,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     on_log=handle_log,
                     on_progress=lambda stage, percent: emit_progress(websocket, stage, percent),
                     on_finding=lambda finding: emit_finding(websocket, finding),
+                    llm_config=llm_config,
                 )
                 findings = await engine.run()
 
@@ -251,10 +253,12 @@ async def websocket_endpoint(websocket: WebSocket):
             elif request_data.get("type") == "APPLY_FIX":
                 finding = request_data.get("finding")
                 target = request_data.get("target")
+                llm_config = request_data.get("llm_config")
                 if finding and target:
                     engine = ScannerEngine(
                         target=target,
                         on_log=lambda text, stage: emit_log(websocket, text, stage),
+                        llm_config=llm_config,
                     )
                     success = await engine.apply_remediation(finding)
                     await manager.send_personal_message(
@@ -317,6 +321,7 @@ async def autopilot_websocket(websocket: WebSocket):
                 target = request_data.get("target", "")
                 goal = request_data.get("goal", "Find and verify vulnerabilities.")
                 session_cookie = request_data.get("session_cookie", None)
+                llm_config = request_data.get("llm_config")
 
                 async def handle_thought(text: str):
                     await manager.send_personal_message({"type": "thought", "message": text}, websocket)
@@ -332,7 +337,8 @@ async def autopilot_websocket(websocket: WebSocket):
                     session_cookie=session_cookie,
                     on_thought=handle_thought,
                     on_action=handle_action,
-                    on_finding=handle_finding
+                    on_finding=handle_finding,
+                    llm_config=llm_config
                 )
                 
                 await pilot.run(mission_goal=goal)
