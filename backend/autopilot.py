@@ -12,6 +12,7 @@ from sandbox import SandboxManager
 
 from agents.base import AgentContext
 from agents.specialized import ScoutAgent, AuditorAgent, RedTeamAgent
+from memory import VectorMemoryManager
 
 class PilotOrchestrator:
     """
@@ -40,10 +41,12 @@ class PilotOrchestrator:
             "code_files": [],
             "verified_findings": [],
             "current_stage": "init",
-            "agent_assignments": []
+            "agent_assignments": [],
+            "recalled_knowledge": []
         }
         self.max_steps = 20
         self.context = AgentContext(target, self.world_model)
+        self.memory = VectorMemoryManager()
         
         self.agents = {
             "scout": ScoutAgent(),
@@ -72,8 +75,15 @@ class PilotOrchestrator:
             print(f"[ACTION] {tool}({params})")
 
     async def run(self, mission_goal: str = "Find and verify as many vulnerabilities as possible."):
-        """The main Agentic Loop with Reflection and Multi-Agent hand-over."""
+        """The main Agentic Loop with Reflection, Multi-Agent hand-over, and LTM Recall."""
         await self._think(f"Mission briefing received: {mission_goal}")
+        
+        # --- BOOTSTRAP: RECALL KNOWLEDGE ---
+        await self._think("Consulting long-term memory for relevant lessons...")
+        recalled = self.memory.recall_relevant(f"{mission_goal} on {self.target}")
+        if recalled:
+            self.world_model["recalled_knowledge"] = recalled
+            await self._think(f"Recalled {len(recalled)} relevant security patterns from previous scans.")
         
         for step in range(self.max_steps):
             agent = self.agents[self.current_agent_key]
@@ -224,6 +234,17 @@ If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond
                 vtype = finding.get("vulnerability_type", "unknown")
                 if not code or not payload: return "Error: Missing data for verification."
                 result, msg = await asyncio.to_thread(self._sandbox.verify_exploit, code, payload, vtype)
+                
+                if result:
+                    # INDEX Knowledge on success
+                    await self._think(f"Success! Adding this verified finding to Long-Term Memory.")
+                    self.memory.save_finding(finding)
+                else:
+                    # UPDATE efficacy on failure if it was a recalled payload
+                    recalled_ids = [k['metadata'].get('id') for k in self.world_model.get("recalled_knowledge", []) if k['metadata'].get('payload') == payload]
+                    for rid in recalled_ids:
+                        if rid: self.memory.update_efficacy(rid, False)
+                
                 return f"Sandbox outcome: {'VERIFIED' if result else 'BLOCKED'}. Message: {msg}"
 
             return f"Error: Tool '{tool_name}' not implemented."

@@ -15,3 +15,4 @@ huggingface_hub
 pyyaml
 openai
 anthropic
+chromadb
