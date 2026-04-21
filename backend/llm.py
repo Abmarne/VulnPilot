@@ -322,6 +322,35 @@ def identify_sinks(code_context: str, llm_config: Optional[Dict] = None) -> List
     except:
         return []
 
+def identify_secrets(code_context: str, llm_config: Optional[Dict] = None) -> List[Dict[str, Any]]:
+    """Analyzes code and configuration files for leaked secrets, API keys, and credentials."""
+    prompt = f"""
+    --- SYSTEM ---
+    You are a high-precision Secret Scanning Engine. Your goal is to identify hardcoded credentials, API keys, private keys, and tokens.
+    
+    --- TASK ---
+    Analyze the following source code and configuration files for leaked secrets.
+    For each discovery, provide a detailed finding object with:
+    - vulnerability_type: (string) e.g., "Hardcoded API Key", "Leaked Private Key"
+    - severity: Critical (for real keys), High (for suspicious tokens)
+    - explanation: (string) Identify the line and what type of secret it appears to be.
+    - impact: (string) Explain what an attacker can do with this secret.
+    - exploit_scenario: (string) How to use this secret.
+    - manual_poc: (string) The secret itself or a redacted version if it's too long.
+    - remediation_steps: (string) How to rotate and move this to environment variables or a vault.
+    - url_pattern: (string) The relative file path.
+
+    Respond ONLY in JSON array format.
+    SOURCE:
+    {code_context}
+    """
+    try:
+        text = _call_llm(prompt, llm_config)
+        secrets = _parse_gemini_json(text)
+        return [s for s in secrets if isinstance(s, dict)]
+    except:
+        return []
+
 def reconstruct_api_schema(js_content: str, llm_config: Optional[Dict] = None) -> List[Dict[str, Any]]:
     prompt = f"Find API endpoints in JS. Respond ONLY in JSON array.\nJS:\n{js_content[:15000]}"
     try:

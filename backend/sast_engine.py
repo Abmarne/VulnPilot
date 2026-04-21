@@ -60,48 +60,57 @@ class SastEngine:
         if not self.target_dir:
             return code_context
             
-        extensions_to_scan = ['.tsx', '.ts', '.js', '.jsx', '.env', '.py', '.yml', '.yaml']
+        extensions_to_scan = ['.tsx', '.ts', '.js', '.jsx', '.env', '.py', '.yml', '.yaml', '.pem', '.key', '.json', '.xml']
         # Always include package.json but never lock files (huge, no vulns)
-        include_filenames = {'package.json', 'requirements.txt', 'docker-compose.yml', 'Dockerfile'}
+        include_filenames = {'package.json', 'requirements.txt', 'docker-compose.yml', 'Dockerfile', '.env.example', 'secrets.yaml', 'config.json'}
         exclude_filenames = {'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '.gitignore'}
-        max_files = 15 # Reduced for speed
+        max_files = 30 # Increased for better coverage
         files_scanned = 0
         
         print("[*] Extracting source files for SAST analysis...")
         
+        found_files = []
         for root, dirs, files in os.walk(self.target_dir):
-            # Exclude noisy directories
             dirs[:] = [d for d in dirs if d not in {
-                'node_modules', '.git', '.next', '__pycache__', 'dist', 'build', '.turbo', 'venv'
+                'node_modules', '.git', '.next', '__pycache__', 'dist', 'build', '.turbo', 'venv', '.venv'
             }]
-            
             for file in files:
-                is_included = file in include_filenames
-                is_excluded = file in exclude_filenames
-                has_ext = any(file.endswith(ext) for ext in extensions_to_scan)
+                found_files.append(os.path.join(root, file))
+
+        # Prioritize "Sensitive" files
+        def score_file(path: str) -> int:
+            name = os.path.basename(path).lower()
+            if name.startswith(".env") or "secret" in name or "config" in name: return 0
+            if name.endswith(".pem") or name.endswith(".key"): return 1
+            if name in include_filenames: return 2
+            return 10
+
+        found_files.sort(key=score_file)
+
+        for file_path in found_files:
+            file = os.path.basename(file_path)
+            is_included = file in include_filenames
+            is_excluded = file in exclude_filenames
+            has_ext = any(file.endswith(ext) for ext in extensions_to_scan)
+            
+            if is_excluded or (not is_included and not has_ext):
+                continue
                 
-                if is_excluded or (not is_included and not has_ext):
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                
+                if not content.strip():
                     continue
                     
-                file_path = os.path.join(root, file)
-                try:
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        content = f.read()
+                rel_path = os.path.relpath(file_path, self.target_dir)
+                code_context += f"\n\n--- FILE PATH: {rel_path} ---\n```\n{content[:2000]}\n```\n"
+                files_scanned += 1
+                # print(f"  [+] Queued: {rel_path}")
                     
-                    if not content.strip():
-                        continue
-                        
-                    rel_path = os.path.relpath(file_path, self.target_dir)
-                    # Increased crop for better import/dependency visibility
-                    code_context += f"\n\n--- FILE PATH: {rel_path} ---\n```\n{content[:1500]}\n```\n"
-                    files_scanned += 1
-                    print(f"  [+] Queued: {rel_path}")
-                        
-                except Exception as e:
-                    print(f"  [!] Could not read {file_path}: {e}")
-                        
-                if files_scanned >= max_files:
-                    break
+            except Exception as e:
+                print(f"  [!] Could not read {file_path}: {e}")
+                    
             if files_scanned >= max_files:
                 break
                 

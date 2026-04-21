@@ -1,169 +1,122 @@
-# VulnPilot
+# 🛸 VulnPilot
 
-> The world's first fully automated active security platform.
+> **The world's first fully automated, context-aware offensive security platform.**
 
-VulnPilot is a context-aware security assistant that finds, verifies, fixes, and explains vulnerabilities in real time. It combines live web-app testing, source-code analysis, replayable evidence, and AI-assisted remediation in one workflow.
+VulnPilot is an autonomous security assistant designed to **find, verify, fix, and explain** vulnerabilities in real-time. By bridging the gap between static analysis (**SAST**) and dynamic testing (**DAST**), VulnPilot provides a seamless workflow that moves from discovery to remediation in seconds.
 
----
-
-## Core Superpowers
-
-### The War Room
-A real-time dashboard streams logs, progress, and findings over WebSockets.
-- Multi-stage pipeline: `init -> profile -> recon -> sca -> sast -> logic -> dast -> analysis`
-- Live finding stream with remediation and replay evidence
-
-### The Active Fixer
-Turn findings into secure code with one click.
-- AI-powered refactoring for local source files
-- Secure remediation snippets and developer-facing steps
-
-### Authenticated Attack Profiles
-Import real authenticated traffic and replay it during scanning for deeper pentest coverage.
-- HAR import for many requests captured from a browser session
-- cURL import for one important authenticated API request
-- Replayable evidence with baseline request, mutated request, status delta, and replay cURL
-
-### Deep Active-Offensive Engine
-- Bespoke AI fuzzing tied to discovered parameters and sinks
-- Logic and IDOR auditing
-- Dependency scanning
-- Taint-chasing SAST to reduce false positives
+[![Status](https://img.shields.io/badge/Status-Active-emerald?style=for-the-badge)]()
+[![Backend](https://img.shields.io/badge/Backend-FastAPI-teal?style=for-the-badge)]()
+[![Frontend](https://img.shields.io/badge/Frontend-Next.js-white?style=for-the-badge)]()
+[![Engine](https://img.shields.io/badge/Engine-Hybrid_AI-blueviolet?style=for-the-badge)]()
 
 ---
 
-## Getting Started
+## ⚡ Core Superpowers
 
-### 1. Clone and Configure
+### 🏟️ The War Room
+A high-fidelity cockpit for security researchers. Monitor your scan's progress via real-time WebSocket streams.
+- **Phased Intelligence**: `init` → `recon` → `sca` → `sast` → `secrets` → `logic` → `dast` → `analysis`.
+- **Live Finding Stream**: Instant alerts with AI-generated explanations and replay evidence.
+
+### 🛠️ The Active Fixer
+Don't just find bugs—obliterate them. One-click security remediation.
+- **Autonomous Refactoring**: AI-powered code transformation for local source files.
+- **Secure Blueprints**: Get developer-facing remediation steps and secure code snippets instantly.
+
+### 🔑 AI-Assisted Secrets Detection
+Sophisticated leak scanning that goes beyond regex.
+- **Intelligent Prioritization**: Scans sensitive targets (`.env`, `secrets.yaml`, `config.json`) first to minimize risk exposure.
+- **False Positive Filtering**: AI validates the context of discovered strings to reduce noise.
+
+### 🎭 Authenticated Attack Profiles
+Audit deeper than ever by importing real browser traffic.
+- **HAR & cURL Import**: Learn complex workflows from your browser session.
+- **Mutation Engine**: Replays and mutates authenticated requests to find IDORs and logic flaws.
+
+### 🌪️ Deep Offensive Engine
+- **Bespoke AI Fuzzing**: Contextual payloads generated based on discovered parameters and sinks.
+- **Taint-Chasing SAST**: Traces user input from entry point to dangerous sink across multiple files.
+- **Native SCA**: AI-assisted dependency analysis to catch vulnerable libraries before they bite.
+
+---
+
+## 🚀 Quick Start
+
+### 1. Initialize the Cockpit
 ```bash
 git clone https://github.com/Abmarne/VulnPilot.git
 cd VulnPilot
 ```
 
+### 2. Configure Brains
 Create a `.env` file in `backend/`:
 ```env
 GOOGLE_API_KEY=your_gemini_key_here
 GROQ_API_KEY=your_groq_key_here
+# Optional: ANTHROPIC_API_KEY, OPENAI_API_KEY
 ```
 
-### 2. Install Dependencies
-Backend:
+### 3. Launch the Engines
+**Backend:**
 ```bash
 cd backend
 python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.txt
+# Windows
+.venv\Scripts\activate
+pip install -r requirements.txt
+python main.py
 ```
 
-Frontend:
+**Frontend:**
 ```bash
 cd ../frontend
 npm install
-```
-
-### 3. Start the App
-Backend:
-```bash
-cd ../backend
-.venv\Scripts\python.exe main.py
-```
-
-Frontend:
-```bash
-cd ../frontend
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+---
+
+## 📖 Using Authenticated Profiles
+
+Authenticated profiles allow VulnPilot to audit dashboards, internal APIs, and logged-in administrative flows.
+
+1.  **Export HAR**: Open DevTools → Network Tab → Right-click → `Save all as HAR with content`.
+2.  **Import**: Paste the HAR file or a single cURL into the VulnPilot dashboard.
+3.  **Audit**: Select the profile and Launch. VulnPilot will automatically merge these requests into its attack surface Map.
 
 ---
 
-## Using Authenticated Attack Profiles
+## 🖥️ Headless CLI Usage
 
-Authenticated attack profiles help VulnPilot reach logged-in pages, dashboards, and internal APIs that a normal crawler may miss.
+For automation and CI/CD pipelines:
 
-### What `Import HAR` Means
-`Import HAR` means uploading a HAR file exported from your browser DevTools Network tab.
-
-A HAR file contains real traffic from your session, including:
-- request URLs
-- HTTP methods
-- headers
-- cookies
-- request bodies
-
-Use HAR import when you want VulnPilot to learn a full authenticated workflow from a real browser session.
-
-### What `Import cURL Profile` Means
-`Import cURL Profile` means pasting one real cURL command into the dashboard.
-
-Use cURL import when you want to target one important authenticated API request quickly.
-
-### HAR vs cURL
-- `HAR`: best for many requests captured from a browser session
-- `cURL`: best for one specific API request or endpoint
-
-### How To Export a HAR File
-In Chrome or Edge:
-1. Open DevTools.
-2. Open the `Network` tab.
-3. Log in and perform the actions you want VulnPilot to learn.
-4. Right-click the request list.
-5. Choose `Save all as HAR with content`.
-
-### How To Use It In VulnPilot
-1. Start the backend and frontend.
-2. Open `http://localhost:3000`.
-3. Enter the target URL in the main target field.
-4. Import one of the following:
-   - a HAR file in `Import HAR Profile`
-   - a cURL command in `Import cURL Profile`
-5. Select the saved profile from `Saved Attack Profile`.
-6. Keep `Use profile requests` enabled.
-7. Launch the scan.
-
-### Example cURL Import
 ```bash
-curl https://example.com/api/me \
-  -H "Cookie: session=abc123" \
-  -H "Content-Type: application/json" \
-  -d "{\"q\":\"test\"}"
-```
+# Full Target Audit
+python cli.py --target "https://your-site.com" --fail-on "High" --output "report.md"
 
-### What Happens During the Scan
-When a profile is selected, VulnPilot will:
-- replay the imported authenticated requests
-- merge them with normal crawler discovery
-- mutate real parameters, headers, and bodies
-- attach replayable evidence to findings
-
-### Where Profiles Are Stored
-Profiles are stored locally in a JSON file inside `backend/.data/attack_profiles.json`. No extra database setup is required.
-
----
-
-## Headless CLI Usage
-
-Manual repository or target audit:
-```bash
-cd backend
-.venv\Scripts\python.exe cli.py --target "https://your-site.com" --fail-on "High" --output "report.md"
-```
-
-Apply security fixes to a local codebase:
-```bash
-cd backend
-.venv\Scripts\python.exe cli.py --target "./" --apply-fix
+# Apply Auto-Remediation to Local Code
+python cli.py --target "./workspace" --apply-fix
 ```
 
 ---
 
-## Architecture Stack
-- Framework: FastAPI
-- UI: Next.js
-- Brain: Google Gemini / Groq
-- Analysis: custom SAST + DAST + replayable request fuzzing
+## 🏗️ Architecture Stack
+
+VulnPilot is built on a mission-critical stack designed for speed and intelligence.
+
+- **Orchestration**: FastAPI (Python)
+- **Interface**: Next.js 14 (React)
+- **Brains**: Multi-model support (Gemini 2.0 Flash, Groq/Llama-3, Claude 3.5, GPT-4o)
+- **Analysis Ecosystem**: 
+  - **Hybrid SAST**: Taint-chasing logic with intelligent file prioritization.
+  - **Contextual DAST**: AI-guided fuzzing based on discovered API schemas.
+  - **Secrets Scanner**: Deep scan for credentials, tokens, and private keys.
+  - **Native SCA**: Automated manifest analysis.
 
 ---
 
-## Contributing
-Secure code is a collective effort. Feel free to open issues or PRs to improve the scanner, remediation prompts, or fuzzing logic.
+## 🤝 Contributing
+
+We believe security is a collective effort. If you have any ideas for new fuzzing payloads, remediation prompts, or engine optimizations, feel free to open a PR!
+
+**VulnPilot** — *Scan smarter, fix faster, sleep better.*

@@ -238,6 +238,14 @@ class ScannerEngine:
                                 )
             sast.cleanup()
 
+        # --- STEP 5: SECRETS SCANNING ---
+        if codebase_path and code_context:
+            await self._emit_log("[*] Secrets: Scanning for hardcoded credentials...", "secrets")
+            secret_findings = llm.identify_secrets(code_context, llm_config=self.llm_config)
+            for s_finding in secret_findings:
+                await self._emit_finding(s_finding)
+            await self._emit_log(f"[*] Secrets: Identified {len(secret_findings)} potential leaks.", "secrets")
+
         await self._emit_progress("logic", 55)
 
         if target_url and endpoints:
