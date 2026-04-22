@@ -34,7 +34,11 @@ Current World Model:
         return "\n".join(lines) + "\n"
 
     async def process_observation(self, action: Dict, observation: Any, context: AgentContext) -> str:
-        return f"Scout analyzed {action.get('tool')}: {str(observation)[:500]}"
+        return f"Scout successfully mapped {len(context.world_model.get('endpoints', []))} endpoints."
+
+    def get_correction_prompt(self, context: AgentContext, action: Dict, observation: Any) -> str:
+        prompt = super().get_correction_prompt(context, action, observation)
+        return prompt + "\nHint: If the crawl found nothing, try checking for common sensitive paths or different entry points."
 
 
 class AuditorAgent(BaseAgent):
@@ -71,7 +75,11 @@ Current World Model:
         return "\n".join(lines) + "\n"
 
     async def process_observation(self, action: Dict, observation: Any, context: AgentContext) -> str:
-        return f"Auditor analyzed {action.get('tool')}: {str(observation)[:500]}"
+        return f"Auditor is analyzing findings. {len(context.world_model.get('code_files', []))} files read so far."
+
+    def get_correction_prompt(self, context: AgentContext, action: Dict, observation: Any) -> str:
+        prompt = super().get_correction_prompt(context, action, observation)
+        return prompt + "\nHint: If code reading failed, check if the file path is correct or if you need to read a parent directory."
 
 
 class RedTeamAgent(BaseAgent):
@@ -109,4 +117,8 @@ Current World Model:
         return "\n".join(lines) + "\n"
 
     async def process_observation(self, action: Dict, observation: Any, context: AgentContext) -> str:
-        return f"RedTeam analyzed {action.get('tool')}: {str(observation)[:500]}"
+        return f"RedTeam has verified {len(context.world_model.get('verified_findings', []))} vulnerabilities."
+
+    def get_correction_prompt(self, context: AgentContext, action: Dict, observation: Any) -> str:
+        prompt = super().get_correction_prompt(context, action, observation)
+        return prompt + "\nHint: If the payload was blocked, consider WAF evasion (encoding, case-switching) or logical bypasses."

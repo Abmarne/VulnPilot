@@ -21,10 +21,30 @@ class BaseAgent(ABC):
         """Generate the system prompt for this agent."""
         pass
 
-    @abstractmethod
+    def get_correction_prompt(self, context: AgentContext, action: Dict, observation: Any) -> str:
+        """Generate a prompt to ask the agent to self-correct based on a tool failure or suboptimal result."""
+        return f"""
+VULNPILOT SELF-CORRECTION PROTOCOL
+Agent: {self.persona_name}
+Action Taken: {json.dumps(action)}
+Observation: {str(observation)[:1000]}
+
+Goal: {context.target}
+
+CRITICAL: The previous action did not yield the expected results or was blocked. 
+Analyze the failure and provide a REFINED ACTION.
+
+If you believe you cannot proceed further, respond with ACTION: finish().
+Otherwise, respond with your reasoning and a new action.
+
+Format:
+THOUGHT: <your analysis of why the previous action failed>
+ACTION: <your new tool call>
+"""
+
     async def process_observation(self, action: Dict, observation: Any, context: AgentContext) -> str:
-        """Analyze the result of a tool execution."""
-        pass
+        """Analyze the result of a tool execution for logging and history."""
+        return f"{self.persona_name} processed {action.get('tool')}."
 
     def _format_world_model(self, world_model: Dict[str, Any]) -> str:
         return json.dumps(world_model, indent=2)

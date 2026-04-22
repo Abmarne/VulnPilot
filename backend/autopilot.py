@@ -133,6 +133,34 @@ class PilotOrchestrator:
             await self._emit_action(tool_name, tool_params)
             observation = await self._execute_tool(tool_name, tool_params)
             
+            # --- PHASE 3: SELF-CORRECTION LOOP (Recursive Reasoning) ---
+            max_sub_steps = 2
+            for sub_step in range(max_sub_steps):
+                if self._should_self_correct(tool_name, observation):
+                    await self._think(f"Observation suggests potential roadblock. Triggering Self-Correction Protocol (Sub-step {sub_step+1})...", persona=agent.persona_name)
+                    
+                    correction_prompt = agent.get_correction_prompt(self.context, action, observation)
+                    correction_response = llm._call_llm(correction_prompt, config=self.llm_config)
+                    
+                    new_thought = self._extract_reasoning(correction_response)
+                    new_action = self._extract_action(correction_response)
+                    
+                    if new_thought:
+                        await self._think(f"[REFINED] {new_thought}", persona=agent.persona_name)
+                    
+                    if not new_action or new_action.get("tool") == "finish":
+                        break
+                    
+                    # Execute refined action
+                    action = new_action
+                    tool_name = action.get("tool")
+                    tool_params = action.get("params", {})
+                    
+                    await self._emit_action(tool_name, tool_params)
+                    observation = await self._execute_tool(tool_name, tool_params)
+                else:
+                    break
+
             # Store history
             self.context.history.append({
                 "step": step,
@@ -161,6 +189,21 @@ Current World Model: {json.dumps(self.world_model, indent=2)}
 
 If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond with "CONTINUE".
 """
+
+    def _should_self_correct(self, tool: str, observation: Any) -> bool:
+        obs_str = str(observation).lower()
+        # Heuristics for failure/blockage/suboptimal results
+        if "error" in obs_str or "exception" in obs_str:
+            return True
+        if "blocked" in obs_str or "denied" in obs_str or "403" in obs_str:
+            return True
+        if tool == "recon_attack_surface" and "found 0" in obs_str:
+            return True
+        if tool == "verify_finding" and "blocked" in obs_str:
+            return True
+        if tool == "read_code" and "error" in obs_str:
+            return True
+        return False
 
     def _determine_handover(self, reflection: str) -> Optional[str]:
         if "HANDOVER: scout" in reflection.lower(): return "scout"
