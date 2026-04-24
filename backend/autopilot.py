@@ -42,7 +42,8 @@ class PilotOrchestrator:
             "verified_findings": [],
             "current_stage": "init",
             "agent_assignments": [],
-            "recalled_knowledge": []
+            "recalled_knowledge": [],
+            "strategic_notes": []
         }
         self.max_steps = 20
         self.context = AgentContext(target, self.world_model)
@@ -289,6 +290,13 @@ If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond
                         if rid: self.memory.update_efficacy(rid, False)
                 
                 return f"Sandbox outcome: {'VERIFIED' if result else 'BLOCKED'}. Message: {msg}"
+
+            elif tool_name == "post_strategic_note":
+                note = params.get("note")
+                if not note: return "Error: Missing note content."
+                self.world_model.setdefault("strategic_notes", []).append(note)
+                await self._think(f"Blackboard updated: '{note[:100]}...'", persona="System")
+                return "Strategic note posted to the Blackboard."
 
             return f"Error: Tool '{tool_name}' not implemented."
         except Exception as e:

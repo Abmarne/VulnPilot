@@ -48,3 +48,11 @@ ACTION: <your new tool call>
 
     def _format_world_model(self, world_model: Dict[str, Any]) -> str:
         return json.dumps(world_model, indent=2)
+
+    def _format_blackboard(self, context: AgentContext) -> str:
+        notes = context.world_model.get("strategic_notes", [])
+        if not notes:
+            return "Strategic Blackboard: No insights posted yet."
+        
+        formatted_notes = "\n".join([f"- {note}" for note in notes])
+        return f"--- STRATEGIC BLACKBOARD (Shared Insights) ---\n{formatted_notes}\n"

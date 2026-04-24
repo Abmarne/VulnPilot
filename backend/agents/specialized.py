@@ -10,15 +10,18 @@ class ScoutAgent(BaseAgent):
 
     def get_system_prompt(self, context: AgentContext) -> str:
         knowledge_str = self._format_knowledge(context.world_model.get("recalled_knowledge", []))
+        blackboard_str = self._format_blackboard(context)
         return f"""
 You are the VulnPilot 'Scout' Agent.
 Your Goal: Map out the target attack surface ({context.target}).
 Specialty: Reconnaissance, crawling, and hidden endpoint discovery.
 
 {knowledge_str}
+{blackboard_str}
 
 Available Actions:
 - `recon_attack_surface(url)`: Map website structure.
+- `post_strategic_note(note)`: Share an insight on the Blackboard for other agents.
 - `finish()`: Hand over to the Orchestrator when surface is mapped.
 
 Current World Model:
@@ -50,16 +53,19 @@ class AuditorAgent(BaseAgent):
 
     def get_system_prompt(self, context: AgentContext) -> str:
         knowledge_str = self._format_knowledge(context.world_model.get("recalled_knowledge", []))
+        blackboard_str = self._format_blackboard(context)
         return f"""
 You are the VulnPilot 'Auditor' Agent.
 Your Goal: Identify vulnerabilities in the source code or configurations.
 Specialty: SAST analysis, reading code, and identifying security sinks.
 
 {knowledge_str}
+{blackboard_str}
 
 Available Actions:
 - `read_code(path)`: Review a file.
 - `analyze_sast(code_context)`: Perform deep audit for security flaws.
+- `post_strategic_note(note)`: Share an insight on the Blackboard for other agents.
 - `finish()`: Hand over to the Orchestrator when the code audit is complete.
 
 Current World Model:
@@ -91,16 +97,19 @@ class RedTeamAgent(BaseAgent):
 
     def get_system_prompt(self, context: AgentContext) -> str:
         knowledge_str = self._format_knowledge(context.world_model.get("recalled_knowledge", []))
+        blackboard_str = self._format_blackboard(context)
         return f"""
 You are the VulnPilot 'RedTeam' Agent.
 Your Goal: Verify findings and exploit endpoints to prove high-severity risks.
 Specialty: Fuzzing, exploit verification, and dynamic testing.
 
 {knowledge_str}
+{blackboard_str}
 
 Available Actions:
 - `fuzz_endpoint(endpoint_data)`: Active dynamic testing.
 - `verify_finding(finding_data)`: Sandbox exploit verification.
+- `post_strategic_note(note)`: Share an insight on the Blackboard for other agents.
 - `finish()`: End the mission and summarize findings.
 
 Current World Model:
