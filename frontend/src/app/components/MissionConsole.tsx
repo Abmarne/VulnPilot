@@ -429,8 +429,9 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
           </button>
         </div>
       </div>
+    </div>
       
-      {/* Strategic Blackboard Panel */}
+    {/* Strategic Blackboard Panel */}
       {blackboardNotes.length > 0 && (
         <div className="w-[300px] hidden md:flex flex-col h-full bg-neutral-900/40 backdrop-blur-md border border-neutral-800 rounded-2xl overflow-hidden shadow-xl animate-in fade-in slide-in-from-right-4 duration-500">
           <div className="px-5 py-4 border-b border-neutral-800 bg-neutral-900/60 flex items-center gap-2">
