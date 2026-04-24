@@ -11,7 +11,7 @@ from engine import ScannerEngine
 from profile_parser import parse_curl_command, parse_har_content, parse_openapi_content
 from profile_store import get_profile, list_profiles, save_profile
 from sast_engine import SastEngine
-from autopilot import SecurityPilot
+from autopilot import PilotOrchestrator as SecurityPilot
 import scan_store
 
 
@@ -330,8 +330,16 @@ async def autopilot_websocket(websocket: WebSocket):
                     try:
                         await pilot.run(mission_goal=goal)
                         await manager.send_personal_message({"type": "mission_complete"}, websocket)
+                    except asyncio.CancelledError:
+                        # Server reloaded mid-mission — gracefully ignore
+                        pass
+                    except WebSocketDisconnect:
+                        pass
                     except Exception as e:
-                        await manager.send_personal_message({"type": "autopilot_error", "error": str(e)}, websocket)
+                        try:
+                            await manager.send_personal_message({"type": "autopilot_error", "error": str(e)}, websocket)
+                        except Exception:
+                            pass
                 
                 asyncio.create_task(run_mission())
 

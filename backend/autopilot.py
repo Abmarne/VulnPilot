@@ -1,6 +1,7 @@
 import json
 import re
 import asyncio
+import os
 from typing import Any, Dict, List, Optional, Callable, Awaitable
 
 import llm
@@ -56,11 +57,12 @@ class PilotOrchestrator:
             "auditor": AuditorAgent(),
             "redteam": RedTeamAgent()
         }
-        self.current_agent_key = "scout" if target.startswith("http") else "auditor"
-        
         # Determine if target is a URL or a Codebase
-        self.is_url = target.startswith(("http://", "https://"))
-        self.codebase_path = target if not self.is_url else None
+        self.is_github = target.startswith(("http://github.com", "https://github.com"))
+        self.is_url = target.startswith(("http://", "https://")) and not self.is_github
+        
+        self.current_agent_key = "scout" if self.is_url else "auditor"
+        self.codebase_path = target if (self.is_github or not self.is_url) else None
         self._sast_engine = SastEngine(self.codebase_path) if self.codebase_path else None
         self._sandbox = SandboxManager()
 
@@ -87,6 +89,21 @@ class PilotOrchestrator:
         if recalled:
             self.world_model["recalled_knowledge"] = recalled
             await self._think(f"Recalled {len(recalled)} relevant security patterns from previous scans.")
+            
+        # --- BOOTSTRAP: SAST PREPARATION ---
+        if self._sast_engine:
+            await self._think("Preparing codebase for SAST analysis...")
+            target_dir = await asyncio.to_thread(self._sast_engine.prepare_codebase)
+            if target_dir:
+                files = []
+                for root, _, fs in os.walk(target_dir):
+                    if '.git' in root or 'node_modules' in root or '.venv' in root: continue
+                    for f in fs:
+                        files.append(os.path.relpath(os.path.join(root, f), target_dir))
+                self.world_model["code_files"] = files[:100]  # Show up to 100 files
+                await self._think(f"Codebase ready. Mapped {len(files)} files.")
+            else:
+                await self._think("Failed to prepare codebase. Proceeding with caution.")
         
         for step in range(self.max_steps):
             agent = self.agents[self.current_agent_key]

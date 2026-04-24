@@ -11,6 +11,7 @@ class ScoutAgent(BaseAgent):
     def get_system_prompt(self, context: AgentContext) -> str:
         knowledge_str = self._format_knowledge(context.world_model.get("recalled_knowledge", []))
         blackboard_str = self._format_blackboard(context)
+        history_str = self._format_history(context)
         return f"""
 You are the VulnPilot 'Scout' Agent.
 Your Goal: Map out the target attack surface ({context.target}).
@@ -18,15 +19,18 @@ Specialty: Reconnaissance, crawling, and hidden endpoint discovery.
 
 {knowledge_str}
 {blackboard_str}
+{history_str}
 
-Available Actions:
-- `recon_attack_surface(url)`: Map website structure.
-- `post_strategic_note(note)`: Share an insight on the Blackboard for other agents.
-- `request_human_intercept(question)`: Pause and ask a human for help if blocked by CAPTCHA, complex auth, or missing context.
-- `finish()`: Hand over to the Orchestrator when surface is mapped.
+Available Tools:
+- recon_attack_surface: Map website structure. params: {{"url": "<target_url>"}}
+- post_strategic_note: Share an insight on the Blackboard. params: {{"note": "<insight>"}}
+- request_human_intercept: Ask a human for help. params: {{"question": "<question>"}}
+- finish: Hand over when surface is fully mapped. params: {{}}
 
 Current World Model:
 {self._format_world_model(context.world_model)}
+
+{self._get_format_instructions()}
 """
 
     def _format_knowledge(self, knowledge: List[Dict]) -> str:
@@ -55,6 +59,23 @@ class AuditorAgent(BaseAgent):
     def get_system_prompt(self, context: AgentContext) -> str:
         knowledge_str = self._format_knowledge(context.world_model.get("recalled_knowledge", []))
         blackboard_str = self._format_blackboard(context)
+        history_str = self._format_history(context)
+        
+        # Build list of unread files
+        all_files = context.world_model.get("code_files", [])
+        read_files = [
+            h.get("action", {}).get("params", {}).get("path", "")
+            for h in context.history
+            if h.get("action", {}).get("tool") == "read_code"
+        ]
+        unread_files = [f for f in all_files if f not in read_files][:15]
+        
+        files_section = ""
+        if unread_files:
+            files_section = "FILES AVAILABLE TO READ (prioritize these):\n" + "\n".join(f"  - {f}" for f in unread_files)
+        elif all_files:
+            files_section = "All priority files have been read. Run analyze_sast or finish."
+        
         return f"""
 You are the VulnPilot 'Auditor' Agent.
 Your Goal: Identify vulnerabilities in the source code or configurations.
@@ -62,16 +83,21 @@ Specialty: SAST analysis, reading code, and identifying security sinks.
 
 {knowledge_str}
 {blackboard_str}
+{history_str}
 
-Available Actions:
-- `read_code(path)`: Review a file.
-- `analyze_sast(code_context)`: Perform deep audit for security flaws.
-- `post_strategic_note(note)`: Share an insight on the Blackboard for other agents.
-- `request_human_intercept(question)`: Pause and ask a human for help if blocked by missing context or encrypted values.
-- `finish()`: Hand over to the Orchestrator when the code audit is complete.
+{files_section}
+
+Available Tools:
+- read_code: Review a specific file. params: {{"path": "<relative_file_path>"}}
+- analyze_sast: Perform deep audit using collected code context. params: {{"code_context": "<pasted_code_snippet>"}}
+- post_strategic_note: Share insight on the Blackboard. params: {{"note": "<insight>"}}
+- request_human_intercept: Ask human for help ONLY if truly blocked. params: {{"question": "<question>"}}
+- finish: Call this when audit is complete. params: {{}}
 
 Current World Model:
 {self._format_world_model(context.world_model)}
+
+{self._get_format_instructions()}
 """
 
     def _format_knowledge(self, knowledge: List[Dict]) -> str:
@@ -100,6 +126,7 @@ class RedTeamAgent(BaseAgent):
     def get_system_prompt(self, context: AgentContext) -> str:
         knowledge_str = self._format_knowledge(context.world_model.get("recalled_knowledge", []))
         blackboard_str = self._format_blackboard(context)
+        history_str = self._format_history(context)
         return f"""
 You are the VulnPilot 'RedTeam' Agent.
 Your Goal: Verify findings and exploit endpoints to prove high-severity risks.
@@ -107,16 +134,19 @@ Specialty: Fuzzing, exploit verification, and dynamic testing.
 
 {knowledge_str}
 {blackboard_str}
+{history_str}
 
-Available Actions:
-- `fuzz_endpoint(endpoint_data)`: Active dynamic testing.
-- `verify_finding(finding_data)`: Sandbox exploit verification.
-- `post_strategic_note(note)`: Share an insight on the Blackboard for other agents.
-- `request_human_intercept(question)`: Pause and ask a human for help if you need a specific payload, bypass token, or MFA code.
-- `finish()`: End the mission and summarize findings.
+Available Tools:
+- fuzz_endpoint: Active dynamic testing. params: {{"endpoint_data": "<endpoint_url>"}}
+- verify_finding: Sandbox exploit verification. params: {{"finding_data": {{"vulnerability_type": "...", "file_path": "...", "payload": "..."}}}}
+- post_strategic_note: Share insight on the Blackboard. params: {{"note": "<insight>"}}
+- request_human_intercept: Ask human for bypass tokens/MFA. params: {{"question": "<question>"}}
+- finish: End mission when exploitation is complete. params: {{}}
 
 Current World Model:
 {self._format_world_model(context.world_model)}
+
+{self._get_format_instructions()}
 """
 
     def _format_knowledge(self, knowledge: List[Dict]) -> str:

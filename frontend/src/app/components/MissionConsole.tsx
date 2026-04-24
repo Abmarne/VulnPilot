@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 const AUTOPILOT_WS = "ws://localhost:8000/api/autopilot/ws";
 
@@ -17,24 +17,48 @@ type MissionConsoleProps = {
   sessionCookie?: string;
   onClose?: () => void;
   llmConfig?: import("./ModelSettings").LLMConfig;
+  autoStart?: boolean;
 };
 
-export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: MissionConsoleProps) {
+export function MissionConsole({ target, sessionCookie, onClose, llmConfig, autoStart }: MissionConsoleProps) {
   const [events, setEvents] = useState<MissionEvent[]>([]);
   const [blackboardNotes, setBlackboardNotes] = useState<string[]>([]);
   const [hitlRequest, setHitlRequest] = useState<{ id: string, question: string } | null>(null);
   const [hitlAnswer, setHitlAnswer] = useState("");
   const [isRunning, setIsRunning] = useState(false);
-  const [missionGoal, setMissionGoal] = useState("Find and verify high-severity vulnerabilities.");
+  const [missionGoal] = useState("Find and verify high-severity vulnerabilities.");
   const [error, setError] = useState<string | null>(null);
   const [expandedFindings, setExpandedFindings] = useState<Set<string>>(new Set());
   const ws = useRef<WebSocket | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const feedRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+  const hasAutoStarted = useRef(false); // guard against StrictMode double-mount
 
+  // Cleanup WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      ws.current?.close();
+    };
+  }, []);
+
+  // Smart scroll: only snap to bottom if user was already at bottom
+  const scrollToBottom = useCallback(() => {
+    const el = feedRef.current;
+    if (!el) return;
+    if (isAtBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const el = feedRef.current;
+    if (!el) return;
+    isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
 
   useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [events]);
+    scrollToBottom();
+  }, [events, scrollToBottom]);
 
   const addEvent = (type: MissionEvent["type"], message: string, payload?: any) => {
     setEvents((prev) => [
@@ -49,19 +73,13 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
     ]);
   };
 
-  const toggleFinding = (id: string) => {
-    setExpandedFindings((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const startMission = () => {
+  const startMission = useCallback(() => {
     if (isRunning) return;
     
-    ws.current?.close();
+    // Only close if already open — don't close a still-connecting socket
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.close();
+    }
     setEvents([]);
     setError(null);
     setIsRunning(true);
@@ -109,6 +127,26 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
       setIsRunning(false);
     };
     socket.onclose = () => setIsRunning(false);
+  }, [target, missionGoal, sessionCookie, llmConfig]);
+
+  // Auto-start when launched from parent — guard against StrictMode double-mount
+  useEffect(() => {
+    if (autoStart && target && !hasAutoStarted.current) {
+      hasAutoStarted.current = true;
+      // Small delay to let StrictMode finish its remount cycle before connecting
+      const timer = setTimeout(() => startMission(), 150);
+      return () => clearTimeout(timer);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart]);
+
+  const toggleFinding = (id: string) => {
+    setExpandedFindings((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const submitHitlAnswer = () => {
@@ -184,8 +222,11 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
           </div>
         )}
 
-      {/* Mission Feed */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div
+          ref={feedRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto p-6 space-y-6"
+        >
         {events.length === 0 && !isRunning && (
           <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
             <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center">
@@ -383,53 +424,33 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
             )}
           </div>
         ))}
-        <div ref={scrollRef} />
       </div>
 
-      {/* Control Panel */}
-      <div className="p-6 border-t border-neutral-800 bg-neutral-900/60 transition-all duration-300">
-        {error && (
-          <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
-            <strong>Engine Error:</strong> {error}
-          </div>
-        )}
-        
-        <div className="flex flex-col gap-4">
-          <div className="relative">
-            <input
-              value={missionGoal}
-              onChange={(e) => setMissionGoal(e.target.value)}
-              disabled={isRunning}
-              placeholder="Define mission objective (e.g. Find SQLi in /api)..."
-              className="w-full bg-neutral-950/50 border border-neutral-800 rounded-xl px-4 py-4 text-sm focus:outline-none focus:border-emerald-500/50 transition-colors disabled:opacity-50"
-            />
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-              {isRunning ? "Mission Active" : "Mission Goal"}
+      {/* Control Panel - show only when not running */}
+      {!isRunning && (
+        <div className="p-4 border-t border-neutral-800 bg-neutral-900/60">
+          {error && (
+            <div className="mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
+              <strong>Engine Error:</strong> {error}
             </div>
-          </div>
-          
+          )}
           <button
             onClick={startMission}
             disabled={isRunning || !target}
-            className={`w-full py-4 rounded-xl font-black uppercase tracking-widest text-sm transition-all shadow-lg ${
-              isRunning 
-                ? "bg-neutral-800 text-neutral-500 cursor-not-allowed" 
-                : "bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:scale-[1.01] active:scale-[0.99] hover:shadow-emerald-500/20"
-            }`}
+            className="w-full py-3 rounded-xl font-black uppercase tracking-widest text-sm bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:scale-[1.01] active:scale-[0.99] transition-all shadow-lg"
           >
-            {isRunning ? (
-              <div className="flex items-center justify-center gap-3">
-                <svg className="animate-spin h-4 w-4 text-emerald-500" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                <span>Audit in Progress</span>
-              </div>
-            ) : "Start Security Audit"}
+            {events.length > 0 ? "Re-run Audit" : "Start Security Audit"}
           </button>
         </div>
-      </div>
-    </div>
+      )}
+      {isRunning && error && (
+        <div className="p-4 border-t border-neutral-800">
+          <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
+            <strong>Engine Error:</strong> {error}
+          </div>
+        </div>
+      )}
+      </div>{/* closes main console flex-col div */}
       
     {/* Strategic Blackboard Panel */}
       {blackboardNotes.length > 0 && (

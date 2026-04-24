@@ -185,7 +185,8 @@ export default function Home() {
                       target={target} 
                       sessionCookie={sessionCookie} 
                       llmConfig={llmConfig}
-                      onClose={() => setShowAutopilot(false)} 
+                      onClose={() => setShowAutopilot(false)}
+                       autoStart={true}
                     />
                   </div>
                </div>

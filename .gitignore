@@ -21,6 +21,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.data
 
 # Next.js / Node
 node_modules/
