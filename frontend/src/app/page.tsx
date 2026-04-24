@@ -180,7 +180,7 @@ export default function Home() {
                     </h3>
                   </div>
                   
-                  <div className="h-[600px]">
+                  <div className="h-[800px]">
                     <MissionConsole 
                       target={target} 
                       sessionCookie={sessionCookie} 

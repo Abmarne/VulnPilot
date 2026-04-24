@@ -6,7 +6,7 @@ const AUTOPILOT_WS = "ws://localhost:8000/api/autopilot/ws";
 
 type MissionEvent = {
   id: string;
-  type: "thought" | "action" | "finding" | "system";
+  type: "thought" | "action" | "finding" | "system" | "blackboard_note" | "hitl_request";
   message: string;
   payload?: any;
   timestamp: string;
@@ -21,12 +21,16 @@ type MissionConsoleProps = {
 
 export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: MissionConsoleProps) {
   const [events, setEvents] = useState<MissionEvent[]>([]);
+  const [blackboardNotes, setBlackboardNotes] = useState<string[]>([]);
+  const [hitlRequest, setHitlRequest] = useState<{ id: string, question: string } | null>(null);
+  const [hitlAnswer, setHitlAnswer] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [missionGoal, setMissionGoal] = useState("Find and verify high-severity vulnerabilities.");
   const [error, setError] = useState<string | null>(null);
   const [expandedFindings, setExpandedFindings] = useState<Set<string>>(new Set());
   const ws = useRef<WebSocket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -84,6 +88,13 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
         addEvent("action", `Executing ${data.tool}...`, data.params);
       } else if (data.type === "finding") {
         addEvent("finding", `Vulnerability Discovered: ${data.data.vulnerability_type}`, data.data);
+      } else if (data.type === "blackboard_note") {
+        const note = data.message.replace("[System] Blackboard updated: ", "").replace(/['"]/g, "");
+        setBlackboardNotes((prev) => [...prev, note]);
+        addEvent("blackboard_note", data.message);
+      } else if (data.type === "hitl_request") {
+        setHitlRequest({ id: crypto.randomUUID(), question: data.question });
+        addEvent("hitl_request", `Human Intercept Requested: ${data.question}`);
       } else if (data.type === "mission_complete") {
         addEvent("system", "🏁 Mission objective completed.");
         setIsRunning(false);
@@ -100,27 +111,78 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
     socket.onclose = () => setIsRunning(false);
   };
 
+  const submitHitlAnswer = () => {
+    if (!ws.current || !hitlRequest || !hitlAnswer.trim()) return;
+    ws.current.send(JSON.stringify({ type: "HITL_RESPONSE", answer: hitlAnswer }));
+    addEvent("system", `Human Responded: ${hitlAnswer}`);
+    setHitlRequest(null);
+    setHitlAnswer("");
+  };
+
+
   return (
-    <div className="flex flex-col h-full bg-neutral-900/50 backdrop-blur-xl border border-neutral-800 rounded-2xl overflow-hidden shadow-2xl">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800 bg-neutral-900/80">
-        <div className="flex items-center gap-3">
-          <div className={`w-3 h-3 rounded-full ${isRunning ? "bg-emerald-500 animate-pulse" : "bg-neutral-600"}`} />
-          <h2 className="text-lg font-black tracking-tighter text-emerald-400 uppercase">Security Consultant</h2>
+    <div className="flex h-full gap-4">
+      {/* Main Console */}
+      <div className="flex-1 flex flex-col h-full bg-neutral-900/50 backdrop-blur-xl border border-neutral-800 rounded-2xl overflow-hidden shadow-2xl relative">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800 bg-neutral-900/80">
+          <div className="flex items-center gap-3">
+            <div className={`w-3 h-3 rounded-full ${isRunning ? "bg-emerald-500 animate-pulse" : "bg-neutral-600"}`} />
+            <h2 className="text-lg font-black tracking-tighter text-emerald-400 uppercase">Security Consultant</h2>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+              Target: <span className="text-neutral-300 font-mono">{target}</span>
+            </span>
+            {onClose && (
+              <button onClick={onClose} className="text-neutral-500 hover:text-white transition-colors">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-4">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-            Target: <span className="text-neutral-300 font-mono">{target}</span>
-          </span>
-          {onClose && (
-            <button onClick={onClose} className="text-neutral-500 hover:text-white transition-colors">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-        </div>
-      </div>
+
+        {/* HITL Overlay */}
+        {hitlRequest && (
+          <div className="absolute inset-0 z-50 bg-neutral-950/80 backdrop-blur-md flex flex-col items-center justify-center p-6">
+            <div className="w-full max-w-lg bg-orange-500/10 border border-orange-500/50 rounded-2xl p-6 shadow-2xl shadow-orange-500/20 animate-in zoom-in-95 duration-300">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-orange-500/20 flex items-center justify-center animate-pulse">
+                  <svg className="w-5 h-5 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white tracking-tight uppercase">Human Assistance Required</h3>
+                  <p className="text-xs text-orange-400/80 uppercase font-bold tracking-widest">Agent is blocked</p>
+                </div>
+              </div>
+              <div className="bg-neutral-950/50 rounded-xl p-4 border border-orange-500/20 text-neutral-300 mb-6 font-mono text-sm">
+                {hitlRequest.question}
+              </div>
+              <div className="space-y-4">
+                <input
+                  type="text"
+                  value={hitlAnswer}
+                  onChange={(e) => setHitlAnswer(e.target.value)}
+                  placeholder="Provide guidance to unblock..."
+                  className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-orange-500 transition-colors"
+                  onKeyDown={(e) => e.key === 'Enter' && submitHitlAnswer()}
+                  autoFocus
+                />
+                <button
+                  onClick={submitHitlAnswer}
+                  disabled={!hitlAnswer.trim()}
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 text-white font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:grayscale"
+                >
+                  Submit Guidance
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       {/* Mission Feed */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -367,6 +429,25 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig }: Mi
           </button>
         </div>
       </div>
+      
+      {/* Strategic Blackboard Panel */}
+      {blackboardNotes.length > 0 && (
+        <div className="w-[300px] hidden md:flex flex-col h-full bg-neutral-900/40 backdrop-blur-md border border-neutral-800 rounded-2xl overflow-hidden shadow-xl animate-in fade-in slide-in-from-right-4 duration-500">
+          <div className="px-5 py-4 border-b border-neutral-800 bg-neutral-900/60 flex items-center gap-2">
+            <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+            <h3 className="text-xs font-black uppercase tracking-widest text-neutral-300">Strategic Blackboard</h3>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-white/10">
+            {blackboardNotes.map((note, idx) => (
+              <div key={idx} className="bg-white/5 border border-white/5 rounded-xl p-3 text-sm text-neutral-300 shadow-inner">
+                {note}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

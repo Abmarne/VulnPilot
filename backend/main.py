@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 import json
+import asyncio
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -282,6 +283,8 @@ async def websocket_endpoint(websocket: WebSocket):
 async def autopilot_websocket(websocket: WebSocket):
     """Autonomous Security Pilot WebSocket endpoint."""
     await manager.connect(websocket)
+    hitl_future: Optional[asyncio.Future] = None
+
     try:
         while True:
             data = await websocket.receive_text()
@@ -294,13 +297,24 @@ async def autopilot_websocket(websocket: WebSocket):
                 llm_config = request_data.get("llm_config")
 
                 async def handle_thought(text: str):
-                    await manager.send_personal_message({"type": "thought", "message": text}, websocket)
+                    if text.startswith("[System] Blackboard updated:"):
+                        await manager.send_personal_message({"type": "blackboard_note", "message": text}, websocket)
+                    else:
+                        await manager.send_personal_message({"type": "thought", "message": text}, websocket)
 
                 async def handle_action(tool: str, params: Any):
                     await manager.send_personal_message({"type": "action", "tool": tool, "params": params}, websocket)
 
                 async def handle_finding(finding: Dict[str, Any]):
                     await manager.send_personal_message({"type": "finding", "data": finding}, websocket)
+                
+                async def handle_human_intercept(question: str) -> str:
+                    nonlocal hitl_future
+                    hitl_future = asyncio.Future()
+                    await manager.send_personal_message({"type": "hitl_request", "question": question}, websocket)
+                    answer = await hitl_future
+                    hitl_future = None
+                    return answer
 
                 pilot = SecurityPilot(
                     target=target,
@@ -308,11 +322,23 @@ async def autopilot_websocket(websocket: WebSocket):
                     on_thought=handle_thought,
                     on_action=handle_action,
                     on_finding=handle_finding,
+                    on_human_intercept=handle_human_intercept,
                     llm_config=llm_config
                 )
                 
-                await pilot.run(mission_goal=goal)
-                await manager.send_personal_message({"type": "mission_complete"}, websocket)
+                async def run_mission():
+                    try:
+                        await pilot.run(mission_goal=goal)
+                        await manager.send_personal_message({"type": "mission_complete"}, websocket)
+                    except Exception as e:
+                        await manager.send_personal_message({"type": "autopilot_error", "error": str(e)}, websocket)
+                
+                asyncio.create_task(run_mission())
+
+            elif request_data.get("type") == "HITL_RESPONSE":
+                answer = request_data.get("answer", "")
+                if hitl_future and not hitl_future.done():
+                    hitl_future.set_result(answer)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
