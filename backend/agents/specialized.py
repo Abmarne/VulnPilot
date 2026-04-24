@@ -22,6 +22,7 @@ Specialty: Reconnaissance, crawling, and hidden endpoint discovery.
 Available Actions:
 - `recon_attack_surface(url)`: Map website structure.
 - `post_strategic_note(note)`: Share an insight on the Blackboard for other agents.
+- `request_human_intercept(question)`: Pause and ask a human for help if blocked by CAPTCHA, complex auth, or missing context.
 - `finish()`: Hand over to the Orchestrator when surface is mapped.
 
 Current World Model:
@@ -66,6 +67,7 @@ Available Actions:
 - `read_code(path)`: Review a file.
 - `analyze_sast(code_context)`: Perform deep audit for security flaws.
 - `post_strategic_note(note)`: Share an insight on the Blackboard for other agents.
+- `request_human_intercept(question)`: Pause and ask a human for help if blocked by missing context or encrypted values.
 - `finish()`: Hand over to the Orchestrator when the code audit is complete.
 
 Current World Model:
@@ -110,6 +112,7 @@ Available Actions:
 - `fuzz_endpoint(endpoint_data)`: Active dynamic testing.
 - `verify_finding(finding_data)`: Sandbox exploit verification.
 - `post_strategic_note(note)`: Share an insight on the Blackboard for other agents.
+- `request_human_intercept(question)`: Pause and ask a human for help if you need a specific payload, bypass token, or MFA code.
 - `finish()`: End the mission and summarize findings.
 
 Current World Model:

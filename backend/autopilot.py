@@ -27,6 +27,7 @@ class PilotOrchestrator:
         on_thought: Optional[Callable[[str], Awaitable[None]]] = None,
         on_action: Optional[Callable[[str, Any], Awaitable[None]]] = None,
         on_finding: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+        on_human_intercept: Optional[Callable[[str], Awaitable[str]]] = None,
         llm_config: Optional[Dict[str, Any]] = None,
     ):
         self.target = target
@@ -34,6 +35,7 @@ class PilotOrchestrator:
         self.on_thought = on_thought
         self.on_action = on_action
         self.on_finding = on_finding
+        self.on_human_intercept = on_human_intercept
         self.llm_config = llm_config
         
         self.world_model = {
@@ -297,6 +299,19 @@ If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond
                 self.world_model.setdefault("strategic_notes", []).append(note)
                 await self._think(f"Blackboard updated: '{note[:100]}...'", persona="System")
                 return "Strategic note posted to the Blackboard."
+
+            elif tool_name == "request_human_intercept":
+                question = params.get("question")
+                if not question: return "Error: Missing question."
+                await self._think(f"Requesting Human Assistance: {question}", persona=self.agents[self.current_agent_key].persona_name)
+                
+                if self.on_human_intercept:
+                    answer = await self.on_human_intercept(question)
+                else:
+                    # Fallback to synchronous input wrapped in to_thread
+                    answer = await asyncio.to_thread(input, f"\n[HUMAN INTERCEPT REQUEST]\nQuestion: {question}\nYour Answer: ")
+                
+                return f"Human responded: {answer}"
 
             return f"Error: Tool '{tool_name}' not implemented."
         except Exception as e:
