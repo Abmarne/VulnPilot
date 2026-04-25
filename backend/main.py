@@ -296,24 +296,32 @@ async def autopilot_websocket(websocket: WebSocket):
                 session_cookie = request_data.get("session_cookie", None)
                 llm_config = request_data.get("llm_config")
 
+                mission_findings = []
+                mission_logs = []
+
                 async def handle_thought(text: str):
+                    mission_logs.append({"message": text, "stage": "autopilot"})
                     if text.startswith("[System] Blackboard updated:"):
                         await manager.send_personal_message({"type": "blackboard_note", "message": text}, websocket)
                     else:
                         await manager.send_personal_message({"type": "thought", "message": text}, websocket)
 
                 async def handle_action(tool: str, params: Any):
+                    mission_logs.append({"message": f"Action: {tool}", "stage": "autopilot"})
                     await manager.send_personal_message({"type": "action", "tool": tool, "params": params}, websocket)
 
                 async def handle_finding(finding: Dict[str, Any]):
+                    mission_findings.append(finding)
                     await manager.send_personal_message({"type": "finding", "data": finding}, websocket)
                 
                 async def handle_human_intercept(question: str) -> str:
                     nonlocal hitl_future
+                    mission_logs.append({"message": f"HITL Request: {question}", "stage": "hitl"})
                     hitl_future = asyncio.Future()
                     await manager.send_personal_message({"type": "hitl_request", "question": question}, websocket)
                     answer = await hitl_future
                     hitl_future = None
+                    mission_logs.append({"message": f"HITL Answer: {answer}", "stage": "hitl"})
                     return answer
 
                 pilot = SecurityPilot(
@@ -329,7 +337,17 @@ async def autopilot_websocket(websocket: WebSocket):
                 async def run_mission():
                     try:
                         await pilot.run(mission_goal=goal)
-                        await manager.send_personal_message({"type": "mission_complete"}, websocket)
+                        # Save to history when complete
+                        scan_id = scan_store.save_scan(
+                            target=target,
+                            findings=mission_findings,
+                            logs=mission_logs
+                        )
+                        await manager.send_personal_message({
+                            "type": "mission_complete",
+                            "scan_id": scan_id,
+                            "finding_count": len(mission_findings)
+                        }, websocket)
                     except asyncio.CancelledError:
                         # Server reloaded mid-mission — gracefully ignore
                         pass

@@ -52,8 +52,14 @@ if not os.environ.get("HF_API_KEY"):
 
 def get_best_default_provider() -> Dict[str, str]:
     """Determines the best provider based on available environment variables.
-    Priority: Groq (Recommended) -> HuggingFace (Free Fallback)
+    Priority: HuggingFace (Stable) -> Groq (Fallback)
     """
+    if os.environ.get("HF_API_KEY"):
+        return {
+            "provider": "huggingface",
+            "model": "Qwen/Qwen2.5-72B-Instruct",
+            "api_key": os.environ["HF_API_KEY"]
+        }
     if os.environ.get("GROQ_API_KEY"):
         return {
             "provider": "groq", 
@@ -62,19 +68,21 @@ def get_best_default_provider() -> Dict[str, str]:
         }
     return {
         "provider": "huggingface",
-        "model": "meta-llama/Llama-3.2-3B-Instruct",
-        "api_key": os.environ.get("HF_API_KEY", "")
+        "model": "Qwen/Qwen2.5-72B-Instruct",
+        "api_key": ""
     }
 
 print(f"[LLM] Initializing provider registry. Fallback mode: {'Base (HF/Groq)'}")
 
 def _call_huggingface(prompt: str, api_key: str, model: str) -> str:
     """Default free provider fallback."""
+    # Use a public, non-gated model as the safe default
+    safe_model = model or "Qwen/Qwen2.5-72B-Instruct"
     try:
         if not api_key:
-            client = InferenceClient(model or "meta-llama/Llama-3.2-3B-Instruct")
+            client = InferenceClient(safe_model)
         else:
-            client = InferenceClient(model or "meta-llama/Llama-3.2-3B-Instruct", token=api_key)
+            client = InferenceClient(safe_model, token=api_key)
         
         response = ""
         for message in client.chat_completion(
@@ -82,7 +90,10 @@ def _call_huggingface(prompt: str, api_key: str, model: str) -> str:
             max_tokens=2048,
             stream=True,
         ):
-            response += message.choices[0].delta.content or ""
+            if message.choices and len(message.choices) > 0:
+                content = message.choices[0].delta.content
+                if content:
+                    response += content
         return response
     except Exception as e:
         print(f"[!] Hugging Face failure: {e}")
@@ -102,6 +113,7 @@ def _call_gemini_dynamic(prompt: str, api_key: str, model: str) -> str:
 
 def _call_groq_dynamic(prompt: str, api_key: str, model: str) -> str:
     if not Groq: return "Error: groq not installed"
+    # Reduced retries for faster failover to HuggingFace
     for attempt in range(2):
         try:
             client = Groq(api_key=api_key)
@@ -110,15 +122,18 @@ def _call_groq_dynamic(prompt: str, api_key: str, model: str) -> str:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
             )
-            return response.choices[0].message.content or ""
+            if response.choices and len(response.choices) > 0:
+                return response.choices[0].message.content or ""
+            return "Error: Empty response from Groq"
         except Exception as e:
             err_msg = str(e)
             if "429" in err_msg or "rate_limit" in err_msg.lower():
-                print(f"[LLM] Groq Rate Limit (429). Waiting 5s (Attempt {attempt+1})...")
-                time.sleep(5)
+                wait_time = 2 # Fixed low wait for fast failover
+                print(f"[LLM] Groq Rate Limit (429). Waiting {wait_time}s (Attempt {attempt+1}/2)...")
+                time.sleep(wait_time)
                 continue
             return f"Error: {e}"
-    return "Error: Groq Rate Limit exceeded after retries."
+    return "Error: Groq Rate Limit exceeded after 2 retries."
 
 def _call_openai_dynamic(prompt: str, api_key: str, model: str) -> str:
     if not OpenAI: return "Error: openai not installed"
@@ -145,13 +160,14 @@ def _call_anthropic_dynamic(prompt: str, api_key: str, model: str) -> str:
     except Exception as e:
         return f"Error: {e}"
 
-def _call_llm(prompt: str, config: Optional[Dict] = None) -> str:
+def _call_llm(prompt: str, config: Optional[Dict] = None, _depth: int = 0) -> str:
     """Dispatches call to appropriate provider based on config with automated fallback.
-    Hierarchy: 
-    1. config['api_key'] (UI Entry)
-    2. Env Variable for config['provider']
-    3. Global Default (get_best_default_provider)
+    _depth guards against infinite recursion when all providers fail.
     """
+    if _depth >= 2:
+        print("[LLM] Circuit breaker triggered — all providers failed. Returning error.")
+        return "Error: All LLM providers exhausted. Check your API keys or rate limits."
+    
     cfg = config or {}
     provider = cfg.get("provider", "").lower()
     api_key = cfg.get("api_key", "")
@@ -177,16 +193,16 @@ def _call_llm(prompt: str, config: Optional[Dict] = None) -> str:
         if env_key_name:
             api_key = os.environ.get(env_key_name, "")
 
-    # 3. Model Correction (Safe Defaults)
-    if provider == "huggingface" and (not model or "Mistral" in model or "zephyr" in model.lower()):
-        model = "meta-llama/Llama-3.2-3B-Instruct" # Vastly more reliable chat support
+    # 3. Safe model defaults — never use gated models as defaults
+    if provider == "huggingface" and not model:
+        model = "Qwen/Qwen2.5-72B-Instruct"
 
     # 4. Final Fallback check
-    if not api_key:
+    if not api_key and provider not in ("huggingface",):
         print(f"[LLM] Warning: No key for {provider}. Falling back to system default...")
         default_cfg = get_best_default_provider()
         if default_cfg["provider"] != provider:
-            return _call_llm(prompt, default_cfg)
+            return _call_llm(prompt, default_cfg, _depth + 1)
 
     # 5. Execute
     result = ""
@@ -202,22 +218,20 @@ def _call_llm(prompt: str, config: Optional[Dict] = None) -> str:
         elif provider == "anthropic":
             result = _call_anthropic_dynamic(prompt, api_key, model)
         else:
-            result = _call_huggingface(prompt, os.environ.get("HF_API_KEY", ""), "meta-llama/Llama-3.2-3B-Instruct")
+            result = _call_huggingface(prompt, os.environ.get("HF_API_KEY", ""), "Qwen/Qwen2.5-72B-Instruct")
     except Exception as e:
         print(f"[LLM] Dispatcher Critical Error in {provider}: {e}")
         result = f"Error: {e}"
 
-    # Automated Fallback: If configured provider fails (and it wasn't a 429), try the system default
-    if result.startswith("Error:") and config is not None:
-        if "429" in result or "rate limit" in result.lower():
-            # If Groq is rate limited even after retries, try Hugging Face as a last ditch
-            if provider == "groq" and os.environ.get("HF_API_KEY"):
-                 print("[LLM] Groq hard rate-limit. Switching to HuggingFace fallback.")
-                 return _call_llm(prompt, {"provider": "huggingface"})
-            return result
-        
-        print(f"[LLM] {provider} failed ({result[:50]}...). Retrying with system default...")
-        return _call_llm(prompt, None) # retry with get_best_default_provider()
+    # Automated Fallback: rate-limit on Groq → try HuggingFace once
+    if result.startswith("Error:"):
+        if ("429" in result or "rate limit" in result.lower()) and provider == "groq":
+            if _depth < 1:
+                print("[LLM] Groq hard rate-limit. Switching to HuggingFace fallback.")
+                return _call_llm(prompt, {"provider": "huggingface", "model": "Qwen/Qwen2.5-72B-Instruct"}, _depth + 1)
+        elif config is not None and _depth < 1:
+            print(f"[LLM] {provider} failed ({result[:60]}). Retrying with system default...")
+            return _call_llm(prompt, None, _depth + 1)
     
     return result
 
@@ -317,9 +331,13 @@ def identify_sinks(code_context: str, llm_config: Optional[Dict] = None) -> List
     """
     try:
         text = _call_llm(prompt, llm_config)
+        if text.startswith("Error:"):
+            print(f"[!] SAST LLM Error: {text}")
+            return []
         sinks = _parse_gemini_json(text)
         return [sink for sink in sinks if isinstance(sink, dict)]
-    except:
+    except Exception as e:
+        print(f"[!] SAST parsing error: {e}")
         return []
 
 def identify_secrets(code_context: str, llm_config: Optional[Dict] = None) -> List[Dict[str, Any]]:
@@ -346,9 +364,13 @@ def identify_secrets(code_context: str, llm_config: Optional[Dict] = None) -> Li
     """
     try:
         text = _call_llm(prompt, llm_config)
+        if text.startswith("Error:"):
+            print(f"[!] Secrets LLM Error: {text}")
+            return []
         secrets = _parse_gemini_json(text)
         return [s for s in secrets if isinstance(s, dict)]
-    except:
+    except Exception as e:
+        print(f"[!] Secrets parsing error: {e}")
         return []
 
 def reconstruct_api_schema(js_content: str, llm_config: Optional[Dict] = None) -> List[Dict[str, Any]]:

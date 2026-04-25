@@ -190,7 +190,7 @@ class PilotOrchestrator:
                 "observation": observation
             })
             
-            await asyncio.sleep(1)
+            # No delay for maximum speed
 
     def _build_reflection_prompt(self, goal: str, current_agent: Any) -> str:
         history_summary = "\n".join([f"- {h['agent']}: {h['thought']}" for h in self.context.history[-3:]])
@@ -267,11 +267,23 @@ If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond
             elif tool_name == "read_code":
                 if not self._sast_engine: return "Error: No local codebase available."
                 path = params.get("path")
+                if not path: return "Error: Missing 'path' parameter."
                 content = self._sast_engine.get_file_content(path)
                 if content:
-                    self.world_model["code_files"].append(path)
-                    return f"Content of {path} (truncated): {content[:500]}..."
-                return f"Error: Could not read {path}."
+                    # Avoid adding duplicate files to the list
+                    if path not in self.world_model["code_files"]:
+                        self.world_model["code_files"].append(path)
+                    return f"Content of {path}:\n\n{content[:5000]}" # Increased limit to 5000 chars
+                return f"Error: Could not read {path}. Are you sure the path is correct? Check the file list in the prompt."
+
+            elif tool_name == "git_clone":
+                return "The repository has already been cloned and prepared for you. Please use 'read_code' to examine files or 'get_full_context' to see an overview of critical files."
+
+            elif tool_name == "get_full_context":
+                if not self._sast_engine: return "Error: No local codebase available."
+                await self._think("Extracting critical files for full context...")
+                context = await asyncio.to_thread(self._sast_engine.extract_critical_files)
+                return f"Full Context (Pre-extracted):\n\n{context}"
 
             elif tool_name == "analyze_sast":
                 context = params.get("code_context")
