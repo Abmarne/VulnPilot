@@ -4,12 +4,14 @@ import { useState, useEffect } from "react";
 import { Settings, Brain, Key, Check, AlertCircle, X } from "lucide-react";
 
 export type LLMConfig = {
-  provider: "huggingface" | "gemini" | "groq" | "openai" | "anthropic";
+  provider: "huggingface" | "gemini" | "groq" | "openai" | "anthropic" | "ollama" | "default";
   model: string;
   api_key: string;
 };
 
 const PROVIDERS = [
+  { id: "default", name: "System Default (Auto)", isFree: true, defaultModel: "auto" },
+  { id: "ollama", name: "Ollama (Local)", isFree: true, defaultModel: "llama3" },
   { id: "huggingface", name: "Hugging Face (Free)", isFree: true, defaultModel: "mistralai/Mistral-7B-Instruct-v0.3" },
   { id: "gemini", name: "Google Gemini", isFree: false, defaultModel: "gemini-2.0-flash" },
   { id: "groq", name: "Groq", isFree: false, defaultModel: "llama-3.3-70b-versatile" },
@@ -26,8 +28,8 @@ export function ModelSettings({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [config, setConfig] = useState<LLMConfig>(initialConfig || {
-    provider: "groq",
-    model: "llama-3.1-8b-instant",
+    provider: "default",
+    model: "auto",
     api_key: ""
   });
 

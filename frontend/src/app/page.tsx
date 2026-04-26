@@ -29,8 +29,8 @@ export default function Home() {
 
   // LLM Configuration (Defaults to Groq as approved)
   const [llmConfig, setLlmConfig] = useState<LLMConfig>({
-    provider: "groq",
-    model: "llama-3.3-70b-versatile",
+    provider: "default",
+    model: "auto",
     api_key: ""
   });
 
@@ -146,8 +146,14 @@ export default function Home() {
                   className="w-full h-16 bg-transparent pl-14 pr-6 text-lg font-medium text-white placeholder:text-neutral-600 focus:outline-none"
                 />
              </div>
-             <button 
-                onClick={() => setShowAutopilot(true)}
+              <button 
+                onClick={() => {
+                  setShowAutopilot(true);
+                  // Allow React to render before scrolling
+                  setTimeout(() => {
+                    document.getElementById("mission-hub")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }, 100);
+                }}
                 disabled={!target.trim() || showAutopilot}
                 className="h-16 px-10 rounded-xl bg-emerald-500 text-neutral-950 font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-emerald-500/10 disabled:opacity-50 disabled:grayscale disabled:hover:scale-100"
               >
@@ -173,7 +179,7 @@ export default function Home() {
 
         {/* Mission View (Integrated AI Feed) */}
         {showAutopilot && (
-          <section className="mt-32 space-y-12 animate-in fade-in duration-500">
+          <section id="mission-hub" className="mt-32 space-y-12 animate-in fade-in duration-500">
             <div className="grid lg:grid-cols-[1fr, 350px] gap-8 items-start">
                {/* Main Experience Feed */}
                <div className="space-y-8">

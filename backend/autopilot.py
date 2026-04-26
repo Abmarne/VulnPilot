@@ -91,38 +91,55 @@ class PilotOrchestrator:
 
     async def run(self, mission_goal: str = "Find and verify as many vulnerabilities as possible."):
         """The main Agentic Loop with Reflection, Multi-Agent hand-over, and LTM Recall."""
+        print(f"[*] Mission started: {mission_goal}")
         await self._think(f"Mission briefing received: {mission_goal}")
         
         # --- BOOTSTRAP: RECALL KNOWLEDGE ---
+        print("[*] Consulting long-term memory for relevant patterns...")
         await self._think("Consulting long-term memory for relevant lessons...")
-        recalled = self.memory.recall_relevant(f"{mission_goal} on {self.target}")
+        recalled = await asyncio.to_thread(self.memory.recall_relevant, f"{mission_goal} on {self.target}")
         if recalled:
             self.world_model["recalled_knowledge"] = recalled
             await self._think(f"Recalled {len(recalled)} relevant security patterns from previous scans.")
             
         # --- BOOTSTRAP: SAST PREPARATION ---
         if self._sast_engine:
+            print("[*] Preparing codebase for SAST analysis...")
             await self._think("Preparing codebase for SAST analysis...")
             target_dir = await asyncio.to_thread(self._sast_engine.prepare_codebase)
             if target_dir:
-                files = []
-                for root, _, fs in os.walk(target_dir):
-                    if '.git' in root or 'node_modules' in root or '.venv' in root: continue
-                    for f in fs:
-                        files.append(os.path.relpath(os.path.join(root, f), target_dir))
+                print(f"[*] Mapping codebase at: {target_dir}")
+                def map_files():
+                    found_files = []
+                    for root, dirs, fs in os.walk(target_dir):
+                        # Prune directories in-place for efficiency
+                        dirs[:] = [d for d in dirs if d not in ('.git', 'node_modules', '.venv', '__pycache__')]
+                        for f in fs:
+                            found_files.append(os.path.relpath(os.path.join(root, f), target_dir))
+                    return found_files
+                
+                files = await asyncio.to_thread(map_files)
                 self.world_model["code_files"] = files[:100]  # Show up to 100 files
+                print(f"[*] Codebase ready. Mapped {len(files)} files.")
                 await self._think(f"Codebase ready. Mapped {len(files)} files.")
             else:
+                print("[!] Failed to prepare codebase.")
                 await self._think("Failed to prepare codebase. Proceeding with caution.")
         
         for step in range(self.max_steps):
             agent = self.agents[self.current_agent_key]
             
             # --- PHASE 1: REFLECTION ---
+            print(f"[*] Phase: Reflection (Agent: {agent.persona_name})")
             await self._think(f"Reflecting on mission state... (Current Agent: {agent.persona_name})")
             reflection_prompt = self._build_reflection_prompt(mission_goal, agent)
-            reflection = llm._call_llm(reflection_prompt, config=self.llm_config)
+            # Offload blocking LLM call to thread to keep WebSocket alive
+            reflection = await asyncio.to_thread(llm._call_llm, reflection_prompt, self.llm_config)
             
+            if reflection.startswith("Error:"):
+                await self._think(f"🚨 REFLECTION ERROR: {reflection}", persona="SYSTEM")
+                break
+                
             if "HANDOVER" in reflection.upper():
                 new_agent_key = self._determine_handover(reflection)
                 if new_agent_key and new_agent_key != self.current_agent_key:
@@ -138,7 +155,13 @@ class PilotOrchestrator:
             
             # --- PHASE 2: REASONING & ACTING ---
             prompt = agent.get_system_prompt(self.context)
-            response = llm._call_llm(prompt, config=self.llm_config)
+            # Offload blocking LLM call to thread to keep WebSocket alive
+            response = await asyncio.to_thread(llm._call_llm, prompt, self.llm_config)
+            
+            if response.startswith("Error:"):
+                await self._think(f"🚨 LLM ERROR: {response}", persona="SYSTEM")
+                # Break loop to avoid infinite error spinning
+                break
             
             reasoning = self._extract_reasoning(response)
             action = self._extract_action(response)
@@ -274,7 +297,7 @@ If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond
                 url = params.get("url") or (self.target if self.is_url else None)
                 if not url: return "Error: Target is not a URL."
                 crawler = ReconCrawler(url, self.session_cookie)
-                data = crawler.map_surface()
+                data = await asyncio.to_thread(crawler.map_surface)
                 new_endpoints = data.get("endpoints", [])
                 self.world_model["endpoints"].extend(new_endpoints)
                 return f"Recon complete. Found {len(new_endpoints)} endpoints."
@@ -283,7 +306,7 @@ If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond
                 if not self._sast_engine: return "Error: No local codebase available."
                 path = params.get("path")
                 if not path: return "Error: Missing 'path' parameter."
-                content = self._sast_engine.get_file_content(path)
+                content = await asyncio.to_thread(self._sast_engine.get_file_content, path)
                 if content:
                     # Avoid adding duplicate files to the list
                     if path not in self.world_model["code_files"]:
@@ -302,7 +325,7 @@ If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond
 
             elif tool_name == "analyze_sast":
                 context = params.get("code_context")
-                sinks = llm.identify_sinks(context, llm_config=self.llm_config)
+                sinks = await asyncio.to_thread(llm.identify_sinks, context, self.llm_config)
                 for sink in sinks:
                     if self.on_finding: await self.on_finding(sink)
                 return f"SAST found {len(sinks)} potential sinks."
@@ -311,15 +334,20 @@ If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond
                 endpoint = params.get("endpoint_data")
                 if not endpoint or not self.is_url: return "Error: Invalid target."
                 fuzzer = Fuzzer([endpoint], self.session_cookie, [], {}, llm_config=self.llm_config)
-                anomalies = fuzzer.run_fuzzer(base_url=self.target)
-                analyzed = llm.analyze_anomalies(anomalies, llm_config=self.llm_config)
+                anomalies = await asyncio.to_thread(fuzzer.run_fuzzer, self.target)
+                analyzed = await asyncio.to_thread(llm.analyze_anomalies, anomalies, self.llm_config)
                 for finding in analyzed:
                     if self.on_finding: await self.on_finding(finding)
                 return f"Fuzzing found {len(analyzed)} vulnerabilities."
 
             elif tool_name == "verify_finding":
                 finding = params.get("finding_data")
-                code = finding.get("code") or (self._sast_engine.get_file_content(finding.get("file_path")) if self._sast_engine else "")
+                # Offload blocking file read if needed
+                if not finding.get("code") and self._sast_engine:
+                    code = await asyncio.to_thread(self._sast_engine.get_file_content, finding.get("file_path"))
+                else:
+                    code = finding.get("code") or ""
+                
                 payload = finding.get("payload")
                 vtype = finding.get("vulnerability_type", "unknown")
                 if not code or not payload: return "Error: Missing data for verification."

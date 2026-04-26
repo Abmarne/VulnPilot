@@ -109,14 +109,13 @@ class SastEngine:
                     if self.status_callback:
                         self.status_callback(f"[*] Scanning: {rel_path}")
                     
-                    # Increased limit to 10k to capture full logic for modern web apps
+                    # Cap total context at 100k chars to fit in standard LLM windows (Groq/Llama)
+                    if len(code_context) + len(content) > 100000:
+                         print(f"[*] Context limit reached (100k). Stopping extraction to preserve AI focus.")
+                         break
+                         
                     code_context += f"\n\n--- FILE PATH: {rel_path} ---\n```\n{content[:10000]}\n```\n"
                     files_scanned += 1
-                    
-                    # Cap total context at 100k chars to fit in standard LLM windows (Groq/Llama)
-                    if len(code_context) > 100000:
-                        # Continue scanning for status but stop adding to initial context
-                        pass
                         
                 except Exception as e:
                     print(f"  [!] Could not read {file_path}: {e}")

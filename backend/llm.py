@@ -28,6 +28,7 @@ Groq = _load_attr("groq", "Groq")
 OpenAI = _load_attr("openai", "OpenAI")
 Anthropic = _load_attr("anthropic", "Anthropic")
 InferenceClient = _load_attr("huggingface_hub", "InferenceClient")
+Ollama = _load_attr("ollama", "Client")
 
 if load_dotenv is not None:
     # Try multiple common locations
@@ -64,42 +65,55 @@ elif os.environ.get("HF_API_KEY"):
 else:
     print(f"[LLM] Warning: No Primary API Keys (Google/HF) found in environment.")
 
-# ── Dynamic Provider Fallback logic ──────────────────────────────────────────
+# ── Simplified Provider Logic ───────────────────────────────────────────────
 
 # Global state for rate-limit cool down (provider_name -> timestamp)
 _PROVIDER_COOL_DOWNS: Dict[str, float] = {}
 _COOL_DOWN_DURATION = 120 # 2 minutes
 
 def get_best_default_provider() -> Dict[str, str]:
-    """Determines the best provider based on available environment variables and health.
-    Priority: Gemini (High Capacity) -> Groq (Fast) -> HuggingFace (Stable)
-    """
+    """Simplified: Priority is Local Ollama -> Cloud Gemini (Free Tier)"""
     now = time.time()
     
-    # Check if Gemini is available
-    if os.environ.get("GOOGLE_API_KEY") and _PROVIDER_COOL_DOWNS.get("gemini", 0) + _COOL_DOWN_DURATION < now:
+    # 1. Try Local Ollama (Bypass truthy check to avoid hangs)
+    try:
+        print("[LLM] Checking Ollama at 127.0.0.1:11434...", flush=True)
+        # Use 127.0.0.1 instead of localhost to avoid IPv6 resolution delays on Windows
+        requests.get("http://127.0.0.1:11434/api/tags", timeout=1.0)
+        return {
+            "provider": "ollama",
+            "model": "llama3", 
+            "api_key": "local"
+        }
+    except Exception as e:
+        print(f"[LLM] Local Ollama not detected: {e}", flush=True)
+        pass
+
+    # 2. Try Gemini 2.0 (Best Cloud Free Tier)
+    gemini_key = os.environ.get("GOOGLE_API_KEY")
+    if gemini_key and _PROVIDER_COOL_DOWNS.get("gemini", 0) + _COOL_DOWN_DURATION < now:
         return {
             "provider": "gemini",
             "model": "gemini-2.0-flash",
-            "api_key": os.environ["GOOGLE_API_KEY"]
+            "api_key": gemini_key
         }
     
-    # Check if Groq is available and not cooled down
-    if os.environ.get("GROQ_API_KEY") and _PROVIDER_COOL_DOWNS.get("groq", 0) + _COOL_DOWN_DURATION < now:
-        return {
-            "provider": "groq", 
-            "model": "llama-3.1-8b-instant", 
-            "api_key": os.environ["GROQ_API_KEY"]
-        }
-    
-    # Ultimate fallback
+    # 3. Last Resort: Fail explicitly so dispatcher can show setup instructions
     return {
-        "provider": "huggingface",
-        "model": "microsoft/Phi-3-mini-4k-instruct",
-        "api_key": os.environ.get("HF_API_KEY", "")
+        "provider": "none", 
+        "model": "setup-required",
+        "api_key": ""
     }
 
-print(f"[LLM] Initializing provider registry. Active: {'Gemini+' if os.environ.get('GOOGLE_API_KEY') else ''}{'Groq+' if os.environ.get('GROQ_API_KEY') else ''}{'HF' if os.environ.get('HF_API_KEY') else ''}")
+active_list = []
+try:
+    # Use 1.0s for init check on 127.0.0.1
+    requests.get("http://127.0.0.1:11434/api/tags", timeout=1.0)
+    active_list.append("Ollama(Local)")
+except: pass
+if os.environ.get("GOOGLE_API_KEY"): active_list.append("Gemini")
+
+print(f"[LLM] Provider Registry Initialized. Default Path: {' -> '.join(active_list) or 'None (Manual Keys Required)'}")
 
 def _call_huggingface(prompt: str, api_key: str, model: str) -> str:
     """Enhanced HF fallback with multi-model retry logic."""
@@ -202,21 +216,59 @@ def _call_anthropic_dynamic(prompt: str, api_key: str, model: str) -> str:
     except Exception as e:
         return f"Error: {e}"
 
+def _call_ollama_dynamic(prompt: str, model: str) -> str:
+    # Force lazy load to ensure newly installed library is detected
+    try:
+        from ollama import Client as OllamaClient
+    except ImportError:
+        return "Error: Ollama python library not installed. Run 'pip install ollama'."
+        
+    import time
+    try:
+        model_name = model or "llama3"
+        print(f"[LLM] Calling Ollama ({model_name})...", flush=True)
+        start_time = time.time()
+        client = OllamaClient(host="http://127.0.0.1:11434")
+        response = client.generate(
+            model=model_name,
+            prompt=prompt
+        )
+        duration = time.time() - start_time
+        print(f"[LLM] Ollama response received in {duration:.1f}s")
+        return response.get("response", "") or ""
+    except Exception as e:
+        err_msg = str(e).lower()
+        if "not found" in err_msg and "model" in err_msg:
+            return f"Error: Ollama model '{model}' not found. Please run 'ollama run {model}' in your terminal first."
+        if "connection" in err_msg or "11434" in err_msg:
+            return "Error: Could not connect to Ollama. Please make sure the Ollama service is running ('ollama serve')."
+        return f"Error: Ollama error - {e}"
+
 def _call_llm(prompt: str, config: Optional[Dict] = None, _depth: int = 0) -> str:
-    """Dispatches call to appropriate provider based on config with automated fallback.
-    _depth guards against infinite recursion when all providers fail.
-    """
+    """Dispatches call to appropriate provider based on config with automated fallback."""
     if _depth >= 2:
-        print("[LLM] Circuit breaker triggered — all providers failed. Returning error.")
-        return "Error: All LLM providers exhausted. Check your API keys or rate limits."
+        return "Error: All LLM providers exhausted."
     
-    cfg = config or {}
+    print(f"[LLM] Request starting... (Depth: {_depth})", flush=True)
+    
     # 1. Resolve API Key & Provider
-    # Use provided config or best default
-    active_config = config or get_best_default_provider()
-    provider = active_config.get("provider", "huggingface")
-    model = active_config.get("model")
-    api_key = active_config.get("api_key")
+    # Use cached default config if needed
+    default_config = get_best_default_provider()
+    active_config = config if (config and config.get("provider") and config.get("provider") != "default") else default_config
+    
+    provider = active_config.get("provider", "none")
+    model = active_config.get("model", "auto")
+    api_key = active_config.get("api_key", "")
+
+    if provider == "none":
+        return "Error: No AI provider configured. Please start Ollama locally or enter an API key."
+
+    # If the provided config is missing an API key but we have one in .env for that provider, fill it
+    if not api_key:
+        if provider == "gemini": api_key = os.environ.get("GOOGLE_API_KEY", "")
+        elif provider == "groq": api_key = os.environ.get("GROQ_API_KEY", "")
+        elif provider == "openai": api_key = os.environ.get("OPENAI_API_KEY", "")
+        elif provider == "anthropic": api_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
     print(f"[LLM] Dispatching to {provider.upper()} ({model})")
     
@@ -226,11 +278,10 @@ def _call_llm(prompt: str, config: Optional[Dict] = None, _depth: int = 0) -> st
         if _PROVIDER_COOL_DOWNS[provider] + _COOL_DOWN_DURATION > now:
             # Silent fallback to keep logs clean
             default_cfg = get_best_default_provider()
-            if default_cfg["provider"] != provider:
+            if default_cfg["provider"] != provider and default_cfg["provider"] != "default":
                 return _call_llm(prompt, default_cfg, _depth + 1)
             else:
-                # If everything is cooled down, try HF as last resort
-                return _call_huggingface(prompt, os.environ.get("HF_API_KEY", ""), "Qwen/Qwen2.5-72B-Instruct")
+                return "Error: Selected provider is cooling down and no alternative default is available."
     
     # 2. If no key was provided in UI, look in Environment
     if not api_key:
@@ -245,18 +296,16 @@ def _call_llm(prompt: str, config: Optional[Dict] = None, _depth: int = 0) -> st
         if env_key_name:
             api_key = os.environ.get(env_key_name, "")
 
-    # 3. Safe model defaults — never use gated models as defaults
-    if provider == "huggingface" and not model:
-        model = "Qwen/Qwen2.5-72B-Instruct"
-
-    # 4. Final Fallback check
-    if not api_key and provider not in ("huggingface",):
+    # 3. Final Fallback check
+    if not api_key and provider not in ("ollama", "huggingface"):
         print(f"[LLM] Warning: No key for {provider}. Falling back to system default...")
         default_cfg = get_best_default_provider()
-        if default_cfg["provider"] != provider:
+        if default_cfg["provider"] != provider and default_cfg["provider"] != "default":
             return _call_llm(prompt, default_cfg, _depth + 1)
+        elif provider != "ollama":
+            return f"Error: No API key provided for {provider}."
 
-    # 5. Execute
+    # 4. Execute
     result = ""
     try:
         if provider == "huggingface":
@@ -267,23 +316,42 @@ def _call_llm(prompt: str, config: Optional[Dict] = None, _depth: int = 0) -> st
             result = _call_groq_dynamic(prompt, api_key, model)
         elif provider == "openai":
             result = _call_openai_dynamic(prompt, api_key, model)
+        elif provider == "ollama":
+            result = _call_ollama_dynamic(prompt, model)
         elif provider == "anthropic":
             result = _call_anthropic_dynamic(prompt, api_key, model)
         else:
-            result = _call_huggingface(prompt, os.environ.get("HF_API_KEY", ""), "Qwen/Qwen2.5-72B-Instruct")
+            return f"Error: Unknown provider {provider}."
     except Exception as e:
-        print(f"[LLM] Dispatcher Critical Error in {provider}: {e}")
+        print(f"[LLM] Dispatcher Critical Error in {provider}: {e}", flush=True)
         result = f"Error: {e}"
 
-    # Automated Fallback: rate-limit on Groq → try HuggingFace once
+    # Automated Fallback / Error Handling
     if result.startswith("Error:"):
-        if ("429" in result or "rate limit" in result.lower()) and provider == "groq":
+        print(f"[LLM] {provider} returned error: {result}", flush=True)
+        # Handle 429 / Rate Limits gracefully
+        if "429" in result or "rate limit" in result.lower() or "resource_exhausted" in result.lower():
+            print(f"[LLM] {provider.upper()} rate limited. Cooling down...")
+            _PROVIDER_COOL_DOWNS[provider] = time.time()
+            
             if _depth < 1:
-                print("[LLM] Groq hard rate-limit. Switching to HuggingFace fallback.")
-                return _call_llm(prompt, {"provider": "huggingface", "model": "Qwen/Qwen2.5-72B-Instruct"}, _depth + 1)
-        elif config is not None and _depth < 1:
-            print(f"[LLM] {provider} failed ({result[:60]}). Retrying with system default...")
-            return _call_llm(prompt, None, _depth + 1)
+                # One retry with a 1.5s delay if it was a transient rate limit
+                time.sleep(1.5)
+                return _call_llm(prompt, config, _depth + 1)
+        
+        # If we failed and it was a specific config, try falling back to the system default ONCE
+        if _depth < 1:
+            # Avoid infinite loop: if the failing provider IS the default, don't just call default again
+            default_cfg = get_best_default_provider()
+            if default_cfg["provider"] == provider:
+                # If Ollama failed, try Gemini as second-best default
+                gemini_key = os.environ.get("GOOGLE_API_KEY")
+                if gemini_key and provider != "gemini":
+                    print(f"[LLM] {provider} failed. Falling back to Gemini...")
+                    return _call_llm(prompt, {"provider": "gemini", "model": "gemini-2.0-flash", "api_key": gemini_key}, _depth + 1)
+            else:
+                print(f"[LLM] {provider} failed. Trying System Default ({default_cfg['provider']}) fallback...")
+                return _call_llm(prompt, default_cfg, _depth + 1)
     
     return result
 
@@ -364,10 +432,14 @@ def generate_fuzzing_payloads(target_urls: List[str], schema_context: Dict[str, 
     return ["' OR 1=1 --", "<script>alert(1)</script>", "../../etc/passwd"]
 
 def identify_sinks(code_context: str, llm_config: Optional[Dict] = None) -> List[Dict[str, Any]]:
+    print(f"[*] Analyzing {len(code_context)} chars of code context for vulnerabilities...", flush=True)
     prompt = f"""
     --- SYSTEM ---
     You are a World-Class Security Researcher and Lead Auditor at a top-tier cybersecurity firm. 
-    Your specialty is deep-dive SAST analysis of modern full-stack applications (React, Next.js, Node.js, Python).
+    Your goal is to find AT LEAST 3 vulnerabilities. If you don't find high-severity ones, look for low-severity misconfigurations.
+    
+    --- CODE CONTEXT ---
+    {code_context}
     
     --- TASK ---
     Analyze the provided source code for high-impact security vulnerabilities. 
