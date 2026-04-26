@@ -26,6 +26,7 @@ def _get_genai_client():
 genai_client_class = _get_genai_client()
 Groq = _load_attr("groq", "Groq")
 OpenAI = _load_attr("openai", "OpenAI")
+Anthropic = _load_attr("anthropic", "Anthropic")
 InferenceClient = _load_attr("huggingface_hub", "InferenceClient")
 
 if load_dotenv is not None:
