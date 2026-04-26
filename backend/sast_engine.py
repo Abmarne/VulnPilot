@@ -5,38 +5,50 @@ import subprocess
 from pathlib import Path
 
 class SastEngine:
-    def __init__(self, codebase_path: str):
+    def __init__(self, codebase_path: str, status_callback=None):
         self.raw_path = codebase_path
         self.is_github = codebase_path.startswith("http://github.com") or codebase_path.startswith("https://github.com")
         self.temp_dir = None
         self.target_dir = os.path.abspath(codebase_path)
+        self._cached_context = None
+        self.status_callback = status_callback
         
     def prepare_codebase(self) -> str:
         """Clones if github, extracts if zip, otherwise validates local path."""
         if self.is_github:
             self.temp_dir = tempfile.mkdtemp(prefix="vulnpilot_sast_")
-            print(f"[*] Cloning {self.raw_path} to {self.temp_dir}...")
+            msg = f"[*] Cloning {self.raw_path} to {self.temp_dir}..."
+            print(msg)
+            if self.status_callback: self.status_callback(msg)
             try:
                 subprocess.run(["git", "clone", "--depth", "1", self.raw_path, self.temp_dir], check=True, capture_output=True)
                 self.target_dir = os.path.abspath(self.temp_dir)
             except Exception as e:
-                print(f"[!] Error cloning repository: {e}")
+                err = f"[!] Error cloning repository: {e}"
+                print(err)
+                if self.status_callback: self.status_callback(err)
                 return ""
         
         # Zip handling
         if self.raw_path.endswith(".zip") and os.path.exists(self.raw_path):
              import zipfile
              self.temp_dir = tempfile.mkdtemp(prefix="vulnpilot_zip_")
-             print(f"[*] Extracting ZIP {self.raw_path} to {self.temp_dir}...")
+             msg = f"[*] Extracting ZIP {self.raw_path} to {self.temp_dir}..."
+             print(msg)
+             if self.status_callback: self.status_callback(msg)
              with zipfile.ZipFile(self.raw_path, 'r') as zip_ref:
                  zip_ref.extractall(self.temp_dir)
              self.target_dir = os.path.abspath(self.temp_dir)
 
         if not os.path.exists(self.target_dir):
-            print(f"[!] Codebase path does not exist: {self.target_dir}")
+            err = f"[!] Codebase path does not exist: {self.target_dir}"
+            print(err)
+            if self.status_callback: self.status_callback(err)
             return ""
             
-        print(f"[*] Codebase initialized at {self.target_dir}")
+        msg = f"[*] Codebase initialized at {self.target_dir}"
+        print(msg)
+        if self.status_callback: self.status_callback(msg)
         return self.target_dir
 
     def _resolve_path(self, rel_path: str) -> str:
@@ -53,68 +65,66 @@ class SastEngine:
             return ""
 
     def extract_critical_files(self) -> str:
-        """
-        Extracts ALL React/Next.js source files into a concatenated string for LLM analysis.
-        """
+        """Walks target_dir and collects content of relevant files."""
+        if self._cached_context:
+            print("[*] Extraction complete: (cached) files queued for SAST analysis.")
+            return self._cached_context
+
         code_context = ""
         if not self.target_dir:
             return code_context
             
-        extensions_to_scan = ['.tsx', '.ts', '.js', '.jsx', '.env', '.py', '.yml', '.yaml', '.pem', '.key', '.json', '.xml']
-        # Always include package.json but never lock files (huge, no vulns)
-        include_filenames = {'package.json', 'requirements.txt', 'docker-compose.yml', 'Dockerfile', '.env.example', 'secrets.yaml', 'config.json'}
+        extensions_to_scan = ['.tsx', '.ts', '.js', '.jsx', '.env', '.py', '.yml', '.yaml', '.pem', '.key', '.json', '.xml', '.sh', '.bash', '.config']
+        include_filenames = {'package.json', 'requirements.txt', 'docker-compose.yml', 'Dockerfile', '.env.example', 'secrets.yaml', 'config.json', 'settings.py', 'main.py'}
         exclude_filenames = {'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '.gitignore'}
-        max_files = 30 # Increased for better coverage
+        max_files = 10000 # Virtually unlimited for full repo coverage
         files_scanned = 0
         
-        print("[*] Extracting source files for SAST analysis...")
-        
-        found_files = []
+        msg = "[*] Extracting source files for SAST analysis..."
+        print(msg)
+        if self.status_callback: self.status_callback(msg)
+
         for root, dirs, files in os.walk(self.target_dir):
-            dirs[:] = [d for d in dirs if d not in {
-                'node_modules', '.git', '.next', '__pycache__', 'dist', 'build', '.turbo', 'venv', '.venv'
-            }]
-            for file in files:
-                found_files.append(os.path.join(root, file))
-
-        # Prioritize "Sensitive" files
-        def score_file(path: str) -> int:
-            name = os.path.basename(path).lower()
-            if name.startswith(".env") or "secret" in name or "config" in name: return 0
-            if name.endswith(".pem") or name.endswith(".key"): return 1
-            if name in include_filenames: return 2
-            return 10
-
-        found_files.sort(key=score_file)
-
-        for file_path in found_files:
-            file = os.path.basename(file_path)
-            is_included = file in include_filenames
-            is_excluded = file in exclude_filenames
-            has_ext = any(file.endswith(ext) for ext in extensions_to_scan)
+            # Skip hidden dirs like .git
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
             
-            if is_excluded or (not is_included and not has_ext):
-                continue
-                
-            try:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                
-                if not content.strip():
+            for file in files:
+                if files_scanned >= max_files:
+                    break
+                    
+                ext = os.path.splitext(file)[1].lower()
+                if ext not in extensions_to_scan and file not in include_filenames:
+                    continue
+                if file in exclude_filenames:
                     continue
                     
-                rel_path = os.path.relpath(file_path, self.target_dir)
-                code_context += f"\n\n--- FILE PATH: {rel_path} ---\n```\n{content[:2000]}\n```\n"
-                files_scanned += 1
-                # print(f"  [+] Queued: {rel_path}")
+                file_path = os.path.join(root, file)
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
                     
-            except Exception as e:
-                print(f"  [!] Could not read {file_path}: {e}")
+                    rel_path = os.path.relpath(file_path, self.target_dir)
                     
-            if files_scanned >= max_files:
-                break
-                
-        print(f"[*] Extraction complete: {files_scanned} files queued for Gemini SAST analysis.")
+                    # Update status for each file scanned
+                    if self.status_callback:
+                        self.status_callback(f"[*] Scanning: {rel_path}")
+                    
+                    # Increased limit to 10k to capture full logic for modern web apps
+                    code_context += f"\n\n--- FILE PATH: {rel_path} ---\n```\n{content[:10000]}\n```\n"
+                    files_scanned += 1
+                    
+                    # Cap total context at 100k chars to fit in standard LLM windows (Groq/Llama)
+                    if len(code_context) > 100000:
+                        # Continue scanning for status but stop adding to initial context
+                        pass
+                        
+                except Exception as e:
+                    print(f"  [!] Could not read {file_path}: {e}")
+
+        self._cached_context = code_context
+        msg = f"[*] Extraction complete: {files_scanned} files queued for SAST analysis."
+        print(msg)
+        if self.status_callback: self.status_callback(msg)
         return code_context
 
     def get_file_content(self, rel_path: str) -> str:

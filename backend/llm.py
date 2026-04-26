@@ -15,10 +15,17 @@ def _load_attr(module_name: str, attr_name: str) -> Any:
 
 # Initial lazy loading of standard clients
 load_dotenv = cast(Optional[Callable[[], None]], _load_attr("dotenv", "load_dotenv"))
-genai = _load_attr("google.genai", "Client")
+
+def _get_genai_client():
+    try:
+        from google import genai
+        return genai.Client
+    except:
+        return None
+
+genai_client_class = _get_genai_client()
 Groq = _load_attr("groq", "Groq")
 OpenAI = _load_attr("openai", "OpenAI")
-Anthropic = _load_attr("anthropic", "Anthropic")
 InferenceClient = _load_attr("huggingface_hub", "InferenceClient")
 
 if load_dotenv is not None:
@@ -38,9 +45,10 @@ if load_dotenv is not None:
 
 # Manual fallback parser if dotenv is missing or failing
 if not os.environ.get("HF_API_KEY"):
-    for path in [".env", "backend/.env", os.path.join(os.path.dirname(__file__), ".env")]:
+    for path in [".env", "backend/.env", os.path.join(os.path.dirname(__file__), ".env"), os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")]:
         if os.path.exists(path):
             try:
+                print(f"[LLM] Manual parsing .env at: {path}")
                 with open(path, 'r') as f:
                     for line in f:
                         if '=' in line and not line.startswith('#'):
@@ -48,61 +56,95 @@ if not os.environ.get("HF_API_KEY"):
                             os.environ[k.strip()] = v.strip().strip('"').strip("'")
             except: pass
 
+if os.environ.get("GOOGLE_API_KEY"):
+    print(f"[LLM] Google Gemini API Key detected ({os.environ['GOOGLE_API_KEY'][:5]}...)")
+elif os.environ.get("HF_API_KEY"):
+    print(f"[LLM] Hugging Face API Key detected ({os.environ['HF_API_KEY'][:5]}...)")
+else:
+    print(f"[LLM] Warning: No Primary API Keys (Google/HF) found in environment.")
+
 # ── Dynamic Provider Fallback logic ──────────────────────────────────────────
 
+# Global state for rate-limit cool down (provider_name -> timestamp)
+_PROVIDER_COOL_DOWNS: Dict[str, float] = {}
+_COOL_DOWN_DURATION = 120 # 2 minutes
+
 def get_best_default_provider() -> Dict[str, str]:
-    """Determines the best provider based on available environment variables.
-    Priority: HuggingFace (Stable) -> Groq (Fallback)
+    """Determines the best provider based on available environment variables and health.
+    Priority: Gemini (High Capacity) -> Groq (Fast) -> HuggingFace (Stable)
     """
-    if os.environ.get("HF_API_KEY"):
+    now = time.time()
+    
+    # Check if Gemini is available
+    if os.environ.get("GOOGLE_API_KEY") and _PROVIDER_COOL_DOWNS.get("gemini", 0) + _COOL_DOWN_DURATION < now:
         return {
-            "provider": "huggingface",
-            "model": "Qwen/Qwen2.5-72B-Instruct",
-            "api_key": os.environ["HF_API_KEY"]
+            "provider": "gemini",
+            "model": "gemini-2.0-flash",
+            "api_key": os.environ["GOOGLE_API_KEY"]
         }
-    if os.environ.get("GROQ_API_KEY"):
+    
+    # Check if Groq is available and not cooled down
+    if os.environ.get("GROQ_API_KEY") and _PROVIDER_COOL_DOWNS.get("groq", 0) + _COOL_DOWN_DURATION < now:
         return {
             "provider": "groq", 
             "model": "llama-3.1-8b-instant", 
             "api_key": os.environ["GROQ_API_KEY"]
         }
+    
+    # Ultimate fallback
     return {
         "provider": "huggingface",
-        "model": "Qwen/Qwen2.5-72B-Instruct",
-        "api_key": ""
+        "model": "microsoft/Phi-3-mini-4k-instruct",
+        "api_key": os.environ.get("HF_API_KEY", "")
     }
 
-print(f"[LLM] Initializing provider registry. Fallback mode: {'Base (HF/Groq)'}")
+print(f"[LLM] Initializing provider registry. Active: {'Gemini+' if os.environ.get('GOOGLE_API_KEY') else ''}{'Groq+' if os.environ.get('GROQ_API_KEY') else ''}{'HF' if os.environ.get('HF_API_KEY') else ''}")
 
 def _call_huggingface(prompt: str, api_key: str, model: str) -> str:
-    """Default free provider fallback."""
-    # Use a public, non-gated model as the safe default
-    safe_model = model or "Qwen/Qwen2.5-72B-Instruct"
-    try:
-        if not api_key:
-            client = InferenceClient(safe_model)
-        else:
-            client = InferenceClient(safe_model, token=api_key)
-        
-        response = ""
-        for message in client.chat_completion(
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=2048,
-            stream=True,
-        ):
-            if message.choices and len(message.choices) > 0:
-                content = message.choices[0].delta.content
+    """Enhanced HF fallback with multi-model retry logic."""
+    # List of reliable models to try in sequence - Prioritize smaller "Truly Free" models first
+    models_to_try = [
+        "microsoft/Phi-3-mini-4k-instruct",
+        "google/gemma-2-2b-it",
+        "HuggingFaceH4/zephyr-7b-beta",
+        "mistralai/Mistral-7B-Instruct-v0.2",
+        "Qwen/Qwen2.5-72B-Instruct",
+        "meta-llama/Llama-3.1-8B-Instruct"
+    ]
+    
+    last_error = "Unknown error"
+    for current_model in models_to_try:
+        try:
+            client = InferenceClient(current_model, token=api_key if api_key else None)
+            
+            res = client.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=2048,
+            )
+            
+            if res.choices and len(res.choices) > 0:
+                content = res.choices[0].message.content
                 if content:
-                    response += content
-        return response
-    except Exception as e:
-        print(f"[!] Hugging Face failure: {e}")
-        return f"Error: {e}"
+                    return content
+            
+        except Exception as e:
+            last_error = str(e)
+            # Handle specific payment/rate errors
+            if "402" in last_error:
+                print(f"[LLM] Model '{current_model}' requires a paid HF plan. Skipping...")
+                continue
+            if "401" in last_error or "Unauthorized" in last_error:
+                return f"Error: Hugging Face API key is invalid. Please check your .env file."
+            
+            print(f"[LLM] Hugging Face model '{current_model}' failed: {last_error[:100]}...")
+            continue
+            
+    return f"Error: All Hugging Face fallback models failed. (Tip: Add a GOOGLE_API_KEY to your .env for a free, high-capacity Gemini fallback!)"
 
 def _call_gemini_dynamic(prompt: str, api_key: str, model: str) -> str:
-    if not genai: return "Error: google-genai not installed"
+    if not genai_client_class: return "Error: google-genai not installed"
     try:
-        client = genai(api_key=api_key)
+        client = genai_client_class(api_key=api_key)
         response = client.models.generate_content(
             model=model or "gemini-2.0-flash",
             contents=prompt
@@ -113,8 +155,8 @@ def _call_gemini_dynamic(prompt: str, api_key: str, model: str) -> str:
 
 def _call_groq_dynamic(prompt: str, api_key: str, model: str) -> str:
     if not Groq: return "Error: groq not installed"
-    # Reduced retries for faster failover to HuggingFace
-    for attempt in range(2):
+    # Single retry for very fast failover
+    for attempt in range(1):
         try:
             client = Groq(api_key=api_key)
             response = client.chat.completions.create(
@@ -128,12 +170,11 @@ def _call_groq_dynamic(prompt: str, api_key: str, model: str) -> str:
         except Exception as e:
             err_msg = str(e)
             if "429" in err_msg or "rate_limit" in err_msg.lower():
-                wait_time = 2 # Fixed low wait for fast failover
-                print(f"[LLM] Groq Rate Limit (429). Waiting {wait_time}s (Attempt {attempt+1}/2)...")
-                time.sleep(wait_time)
-                continue
+                _PROVIDER_COOL_DOWNS["groq"] = time.time()
+                print(f"[LLM] Groq Rate Limit (429). Triggering cool-down and failing fast.")
+                return f"Error: 429 Rate Limit"
             return f"Error: {e}"
-    return "Error: Groq Rate Limit exceeded after 2 retries."
+    return "Error: Groq failed."
 
 def _call_openai_dynamic(prompt: str, api_key: str, model: str) -> str:
     if not OpenAI: return "Error: openai not installed"
@@ -169,16 +210,26 @@ def _call_llm(prompt: str, config: Optional[Dict] = None, _depth: int = 0) -> st
         return "Error: All LLM providers exhausted. Check your API keys or rate limits."
     
     cfg = config or {}
-    provider = cfg.get("provider", "").lower()
-    api_key = cfg.get("api_key", "")
-    model = cfg.get("model", "")
-
     # 1. Resolve API Key & Provider
-    if not provider:
-        default_cfg = get_best_default_provider()
-        provider = default_cfg["provider"]
-        api_key = api_key or default_cfg["api_key"]
-        model = model or default_cfg["model"]
+    # Use provided config or best default
+    active_config = config or get_best_default_provider()
+    provider = active_config.get("provider", "huggingface")
+    model = active_config.get("model")
+    api_key = active_config.get("api_key")
+
+    print(f"[LLM] Dispatching to {provider.upper()} ({model})")
+    
+    # Check Cool-down before dispatching
+    now = time.time()
+    if provider in _PROVIDER_COOL_DOWNS:
+        if _PROVIDER_COOL_DOWNS[provider] + _COOL_DOWN_DURATION > now:
+            # Silent fallback to keep logs clean
+            default_cfg = get_best_default_provider()
+            if default_cfg["provider"] != provider:
+                return _call_llm(prompt, default_cfg, _depth + 1)
+            else:
+                # If everything is cooled down, try HF as last resort
+                return _call_huggingface(prompt, os.environ.get("HF_API_KEY", ""), "Qwen/Qwen2.5-72B-Instruct")
     
     # 2. If no key was provided in UI, look in Environment
     if not api_key:
@@ -313,20 +364,34 @@ def generate_fuzzing_payloads(target_urls: List[str], schema_context: Dict[str, 
 
 def identify_sinks(code_context: str, llm_config: Optional[Dict] = None) -> List[Dict[str, Any]]:
     prompt = f"""
-    Analyze the following code for security Sinks, data leakage, and logic flaws.
-    For each discovery, provide a detailed finding object with:
-    - vulnerability_type: (string)
-    - severity: Critical, High, Medium, or Low (string)
-    - explanation: (string) Concise description of the line(s) involved.
-    - impact: (string) Explain EXACTLY how this causes a bug or security vulnerability. What is at risk?
-    - exploit_scenario: (string) Step-by-step of how to trigger this.
-    - manual_poc: (string) A curl command or python snippet that proves the bug.
-    - remediation_steps: (string) Actionable fix instructions.
-    - url_pattern: (string) The relative file path.
-    - required_context: (list of strings) Any other files needed to trace this.
+    --- SYSTEM ---
+    You are a World-Class Security Researcher and Lead Auditor at a top-tier cybersecurity firm. 
+    Your specialty is deep-dive SAST analysis of modern full-stack applications (React, Next.js, Node.js, Python).
+    
+    --- TASK ---
+    Analyze the provided source code for high-impact security vulnerabilities. 
+    Focus on:
+    1. Broken Access Control (Insecure Direct Object References, missing auth guards).
+    2. Injection (SQLi, NoSQLi, Command Injection, XSS).
+    3. Server-Side Request Forgery (SSRF) and Insecure Deserialization.
+    4. Prototype Pollution and Logic Flaws in JavaScript/TypeScript.
+    5. Insecure handling of secrets or PII.
 
-    Respond ONLY in JSON array format.
-    SOURCE:
+    --- FINDING REQUIREMENTS ---
+    For each discovery, provide a detailed finding object with:
+    - vulnerability_type: (string) e.g., "SQL Injection", "Broken Access Control"
+    - severity: Critical, High, Medium, or Low (string)
+    - explanation: (string) Identify the exact line and explain the flaw.
+    - impact: (string) What can a malicious actor do? (e.g., "Full DB takeover", "Account Takeover")
+    - exploit_scenario: (string) Step-by-step instructions on how to exploit this.
+    - manual_poc: (string) A payload or script that proves the vulnerability.
+    - remediation_steps: (string) The exact code fix or architectural change required.
+    - url_pattern: (string) The relative file path where the bug exists.
+    - required_context: (list of strings) Paths to other files needed to trace this bug.
+
+    Respond ONLY with a JSON array of these finding objects. If no vulnerabilities are found, respond with an empty array [].
+    
+    --- SOURCE CODE ---
     {code_context}
     """
     try:

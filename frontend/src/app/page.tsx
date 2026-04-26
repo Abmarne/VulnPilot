@@ -34,19 +34,6 @@ export default function Home() {
     api_key: ""
   });
 
-  // Load persistence
-  useEffect(() => {
-    const saved = localStorage.getItem("vp_llm_config");
-    if (saved) {
-      try {
-        setLlmConfig(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to load LLM config", e);
-      }
-    }
-    fetchHistory();
-  }, []);
-
   const handleLlmConfigChange = (newConfig: LLMConfig) => {
     setLlmConfig(newConfig);
     localStorage.setItem("vp_llm_config", JSON.stringify(newConfig));
@@ -61,6 +48,23 @@ export default function Home() {
       console.error("Failed to fetch history", err);
     }
   };
+
+  // Load persistence
+  useEffect(() => {
+    const saved = localStorage.getItem("vp_llm_config");
+    if (saved) {
+      try {
+        setLlmConfig(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to load LLM config", e);
+      }
+    }
+    fetchHistory();
+
+    const handleRefresh = () => fetchHistory();
+    window.addEventListener("scan_completed", handleRefresh);
+    return () => window.removeEventListener("scan_completed", handleRefresh);
+  }, []);
 
   const handleImport = async (type: string, data: any) => {
     if (!target.trim()) {

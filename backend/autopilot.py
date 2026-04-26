@@ -63,7 +63,17 @@ class PilotOrchestrator:
         
         self.current_agent_key = "scout" if self.is_url else "auditor"
         self.codebase_path = target if (self.is_github or not self.is_url) else None
-        self._sast_engine = SastEngine(self.codebase_path) if self.codebase_path else None
+        
+        # Create a sync wrapper for the async _think method to provide live updates from the engine
+        def engine_status_sync(msg):
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self._think(msg, persona="Engine"))
+            except:
+                pass
+
+        self._sast_engine = SastEngine(self.codebase_path, status_callback=engine_status_sync) if self.codebase_path else None
         self._sandbox = SandboxManager()
 
     async def _think(self, text: str, persona: str = "Orchestrator"):
@@ -211,17 +221,22 @@ If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond
 """
 
     def _should_self_correct(self, tool: str, observation: Any) -> bool:
-        obs_str = str(observation).lower()
-        # Heuristics for failure/blockage/suboptimal results
-        if "error" in obs_str or "exception" in obs_str:
+        obs_str = str(observation)
+        obs_lower = obs_str.lower()
+        
+        # Only trigger if it's a SYSTEM error, not just 'error' appearing in code content
+        if obs_str.startswith("Error:") or obs_str.startswith("Exception:"):
             return True
-        if "blocked" in obs_str or "denied" in obs_str or "403" in obs_str:
+            
+        # Specific tool failure patterns
+        if "tool" in obs_lower and "not implemented" in obs_lower:
             return True
-        if tool == "recon_attack_surface" and "found 0" in obs_str:
+        if "missing" in obs_lower and "parameter" in obs_lower:
             return True
-        if tool == "verify_finding" and "blocked" in obs_str:
+            
+        if tool == "recon_attack_surface" and "found 0" in obs_lower:
             return True
-        if tool == "read_code" and "error" in obs_str:
+        if tool == "read_code" and obs_str.startswith("Error:"):
             return True
         return False
 
@@ -283,7 +298,7 @@ If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond
                 if not self._sast_engine: return "Error: No local codebase available."
                 await self._think("Extracting critical files for full context...")
                 context = await asyncio.to_thread(self._sast_engine.extract_critical_files)
-                return f"Full Context (Pre-extracted):\n\n{context}"
+                return f"SUCCESS: Critical source files extracted for analysis. Use 'analyze_sast' to report findings or 'read_code' for deep dives.\n\n{context}"
 
             elif tool_name == "analyze_sast":
                 context = params.get("code_context")

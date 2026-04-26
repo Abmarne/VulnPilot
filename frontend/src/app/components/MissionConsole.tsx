@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { Zap, X, Shield, Activity, Target } from "lucide-react";
+import type { LLMConfig } from "./ModelSettings";
 
 const AUTOPILOT_WS = "ws://localhost:8000/api/autopilot/ws";
 
@@ -16,7 +18,7 @@ type MissionConsoleProps = {
   target: string;
   sessionCookie?: string;
   onClose?: () => void;
-  llmConfig?: import("./ModelSettings").LLMConfig;
+  llmConfig?: LLMConfig;
   autoStart?: boolean;
 };
 
@@ -32,6 +34,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
   const ws = useRef<WebSocket | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
+  const [lastAction, setLastAction] = useState<string>("Initializing...");
   const hasAutoStarted = useRef(false); // guard against StrictMode double-mount
 
   // Cleanup WebSocket on unmount
@@ -64,7 +67,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
     setEvents((prev) => [
       ...prev,
       {
-        id: crypto.randomUUID(),
+        id: Math.random().toString(36).substring(2, 11),
         type,
         message,
         payload,
@@ -102,23 +105,33 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
       const data = JSON.parse(e.data);
       if (data.type === "thought") {
         addEvent("thought", data.message);
+        setLastAction(data.message.length > 60 ? data.message.substring(0, 57) + "..." : data.message);
       } else if (data.type === "action") {
         addEvent("action", `Executing ${data.tool}...`, data.params);
+        setLastAction(`Tool Call: ${data.tool}`);
       } else if (data.type === "finding") {
         addEvent("finding", `Vulnerability Discovered: ${data.data.vulnerability_type}`, data.data);
+        setLastAction("Critical finding identified!");
       } else if (data.type === "blackboard_note") {
         const note = data.message.replace("[System] Blackboard updated: ", "").replace(/['"]/g, "");
         setBlackboardNotes((prev) => [...prev, note]);
         addEvent("blackboard_note", data.message);
       } else if (data.type === "hitl_request") {
-        setHitlRequest({ id: crypto.randomUUID(), question: data.question });
+        setHitlRequest({ id: Math.random().toString(36).substring(2, 11), question: data.question || "The agent needs your input to continue." });
         addEvent("hitl_request", `Human Intercept Requested: ${data.question}`);
+        setLastAction("Waiting for user input...");
       } else if (data.type === "mission_complete") {
-        addEvent("system", "🏁 Mission objective completed.");
+        addEvent("system", `🏁 Mission complete. Total findings: ${data.finding_count || 0}. Saved to archive.`);
         setIsRunning(false);
+        setLastAction("Mission Complete.");
+        // Refresh history if callback provided
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("scan_completed"));
+        }
       } else if (data.type === "autopilot_error") {
         setError(data.error);
         setIsRunning(false);
+        setLastAction("Error encountered.");
       }
     };
 
@@ -129,16 +142,20 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
     socket.onclose = () => setIsRunning(false);
   }, [target, missionGoal, sessionCookie, llmConfig]);
 
-  // Auto-start when launched from parent — guard against StrictMode double-mount
+  // Auto-start when launched from parent
   useEffect(() => {
-    if (autoStart && target && !hasAutoStarted.current) {
-      hasAutoStarted.current = true;
+    let active = true;
+    if (autoStart && target) {
       // Small delay to let StrictMode finish its remount cycle before connecting
-      const timer = setTimeout(() => startMission(), 150);
-      return () => clearTimeout(timer);
+      const timer = setTimeout(() => {
+        if (active) startMission();
+      }, 150);
+      return () => {
+        active = false;
+        clearTimeout(timer);
+      };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoStart]);
+  }, [autoStart, target, startMission]);
 
   const toggleFinding = (id: string) => {
     setExpandedFindings((prev) => {
@@ -166,6 +183,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
         <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800 bg-neutral-900/80">
           <div className="flex items-center gap-3">
             <div className={`w-3 h-3 rounded-full ${isRunning ? "bg-emerald-500 animate-pulse" : "bg-neutral-600"}`} />
+            <Shield className="w-5 h-5 text-emerald-400" />
             <h2 className="text-lg font-black tracking-tighter text-emerald-400 uppercase">Security Consultant</h2>
           </div>
           <div className="flex items-center gap-4">
@@ -174,9 +192,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
             </span>
             {onClose && (
               <button onClick={onClose} className="text-neutral-500 hover:text-white transition-colors">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <X className="w-5 h-5" />
               </button>
             )}
           </div>
@@ -221,45 +237,85 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
             </div>
           </div>
         )}
+        {/* Status HUD Overlay */}
+        {isRunning && (
+          <div className="px-6 py-3 bg-neutral-950/40 border-b border-neutral-800 backdrop-blur-md flex items-center justify-between sticky top-0 z-20">
+            <div className="flex items-center gap-4 flex-1">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-500">Live Mission</span>
+              </div>
+              <div className="h-4 w-px bg-neutral-800" />
+              <div className="flex-1 overflow-hidden">
+                <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest truncate animate-in slide-in-from-left-2 duration-500">
+                  <span className="text-neutral-600 mr-2">Current Activity:</span>
+                  {lastAction}
+                </p>
+                <div className="h-1 w-32 bg-neutral-800 rounded-full mt-1 overflow-hidden">
+                  <div 
+                    className="h-full bg-emerald-500 transition-all duration-1000 ease-in-out" 
+                    style={{ width: `${Math.min(10 + (events.length * 2), 95)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-6 ml-4">
+              <div className="flex flex-col items-end">
+                <span className="text-[8px] font-black uppercase tracking-widest text-neutral-600">Findings Found</span>
+                <span className="text-xs font-black text-emerald-400">{events.filter(e => e.type === "finding").length}</span>
+              </div>
+              <div className="flex flex-col items-end">
+                <span className="text-[8px] font-black uppercase tracking-widest text-neutral-600">Audit Phase</span>
+                <span className="text-xs font-black text-white uppercase tracking-tighter">
+                   {events.filter(e => e.type === "finding").length > 0 ? "Verifying" : "Scanning"}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
 
       <div
           ref={feedRef}
           onScroll={handleScroll}
           className="flex-1 overflow-y-auto p-6 space-y-6"
         >
-        {events.length === 0 && !isRunning && (
+        {/* Empty State / Offline */}
+        {events.length === 0 && !isRunning && !error && (
           <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
             <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center">
-              <svg className="w-8 h-8 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
+              <Activity className="w-8 h-8 text-emerald-500" />
             </div>
             <div className="space-y-1">
               <h3 className="text-xl font-bold text-emerald-400">Autopilot Offline</h3>
               <p className="text-sm text-neutral-500 max-w-xs">Enter your mission objective and engage the autopilot to begin autonomous analysis.</p>
+              <button 
+                onClick={startMission}
+                className="mt-4 px-6 py-2 rounded-lg bg-emerald-500 text-neutral-950 text-xs font-black uppercase tracking-widest hover:scale-105 transition-all"
+              >
+                Engage Autopilot
+              </button>
             </div>
           </div>
         )}
 
-        {events.map((ev) => (
-          <div key={ev.id} className="group animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {ev.type === "thought" ? (
-              <div className="flex gap-4">
-                <div className="w-1 bg-emerald-500/30 rounded-full" />
-                <div className="flex-1 space-y-1">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-500/60">Consultant Note</div>
-                  <p className="text-sm text-neutral-200 leading-relaxed italic">{ev.message}</p>
-                </div>
-              </div>
-            ) : ev.type === "action" ? (
-              <div className="flex gap-4">
-                <div className="w-1 bg-teal-500/30 rounded-full" />
-                <div className="flex-1 space-y-1">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-teal-500/60">Activity</div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm text-teal-400 font-bold">{ev.message}</span>
-                  </div>
-                </div>
+        {/* Loading / Thinking State */}
+        {isRunning && events.filter(ev => ["finding", "system", "hitl_request"].includes(ev.type)).length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full text-center space-y-4 animate-pulse">
+            <div className="w-12 h-12 rounded-full border-2 border-emerald-500/20 border-t-emerald-500 animate-spin" />
+            <p className="text-xs font-bold text-emerald-500/60 uppercase tracking-[0.3em]">Strategizing...</p>
+          </div>
+        )}
+
+        {/* Event List */}
+        {events
+          .filter(ev => ["finding", "system", "hitl_request"].includes(ev.type))
+          .map((ev) => (
+            <div key={ev.id} className="group animate-in fade-in slide-in-from-bottom-2 duration-300">
+            {ev.type === "system" ? (
+              <div className="flex items-center gap-3 py-2">
+                <div className="h-px flex-1 bg-neutral-800" />
+                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest px-3">{ev.message}</span>
+                <div className="h-px flex-1 bg-neutral-800" />
               </div>
             ) : ev.type === "finding" ? (
               <div
@@ -295,6 +351,12 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
                     <h4 className="text-base font-bold text-white tracking-tight group-hover/card:text-red-400 transition-colors">
                       {ev.payload?.vulnerability_type}
                     </h4>
+                    {ev.payload?.manual_poc && (
+                      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-teal-500/20 border border-teal-500/30 text-[9px] font-black text-teal-400 uppercase tracking-tighter animate-pulse">
+                        <Zap className="w-2.5 h-2.5 fill-teal-400" />
+                        PoC Verified
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-[10px] text-neutral-500 font-mono tracking-tighter opacity-70">
@@ -364,7 +426,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
                           <div className="space-y-1.5">
                             <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-teal-400/80">
                               <div className="w-1.5 h-1.5 rounded-full bg-teal-400/50" />
-                              Proof of Concept (PoC)
+                              Proof of Exploitation (PoC)
                             </div>
                             <div className="group/code relative">
                               <pre className="bg-neutral-950/90 p-4 rounded-xl text-[11px] font-mono text-emerald-400 overflow-x-auto border border-emerald-500/20 max-h-[150px] scrollbar-thin scrollbar-thumb-white/10">
@@ -373,7 +435,9 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  navigator.clipboard.writeText(ev.payload.manual_poc);
+                                  if (ev.payload?.manual_poc) {
+                                    navigator.clipboard.writeText(ev.payload.manual_poc);
+                                  }
                                 }}
                                 className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/10 opacity-0 group-hover/code:opacity-100 transition-opacity hover:bg-emerald-500/20 text-emerald-400"
                                 title="Copy PoC"
@@ -415,6 +479,35 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
                   </div>
                 )}
               </div>
+            ) : ev.type === "hitl_request" ? (
+              <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-3">
+                <div className="flex items-center gap-2 text-amber-400">
+                  <Shield className="w-4 h-4" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Human Intercept Required</span>
+                </div>
+                <p className="text-sm text-neutral-200">{ev.message}</p>
+                <div className="flex gap-2">
+                  <input 
+                    type="text"
+                    value={hitlAnswer}
+                    onChange={(e) => setHitlAnswer(e.target.value)}
+                    placeholder="Provide information..."
+                    className="flex-1 h-9 bg-black/40 border border-white/10 rounded-lg px-3 text-xs text-white focus:outline-none focus:border-amber-500/50"
+                  />
+                  <button 
+                    onClick={() => {
+                      if (ws.current) {
+                        ws.current.send(JSON.stringify({ type: "HITL_RESPONSE", answer: hitlAnswer }));
+                        setHitlAnswer("");
+                        setHitlRequest(null);
+                      }
+                    }}
+                    className="px-4 h-9 bg-amber-500 text-neutral-950 text-[10px] font-black uppercase rounded-lg"
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
             ) : (
               <div className="flex items-center gap-3 text-neutral-500">
                 <div className="h-[1px] flex-1 bg-neutral-800" />
@@ -453,6 +546,8 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
       </div>{/* closes main console flex-col div */}
       
     {/* Strategic Blackboard Panel */}
+      {/* Strategic Blackboard Panel Hidden as per user request */}
+      {/* 
       {blackboardNotes.length > 0 && (
         <div className="w-[300px] hidden md:flex flex-col h-full bg-neutral-900/40 backdrop-blur-md border border-neutral-800 rounded-2xl overflow-hidden shadow-xl animate-in fade-in slide-in-from-right-4 duration-500">
           <div className="px-5 py-4 border-b border-neutral-800 bg-neutral-900/60 flex items-center gap-2">
@@ -470,6 +565,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
           </div>
         </div>
       )}
+      */}
     </div>
   );
 }

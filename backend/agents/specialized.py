@@ -78,11 +78,13 @@ class AuditorAgent(BaseAgent):
         
         return f"""
 You are the VulnPilot 'Auditor' Agent.
-Your Goal: Identify vulnerabilities in the source code or configurations.
-Specialty: SAST analysis, reading code, and identifying security sinks.
+    Your Goal: Identify EVERY possible vulnerability in the source code or configurations.
+    Specialty: Deep-dive SAST analysis, logic flow tracking, and edge-case hunting.
+    
+    CRITICAL: Do not stop at the first 2-3 findings. A professional audit should find at least 5-10 issues including low-severity ones like missing security headers or insecure dependencies.
 
-IMPORTANT: The repository has ALREADY been cloned and mapped for you. Do NOT try to clone it yourself.
-Use 'get_full_context' as your FIRST action to quickly see all critical code and configurations at once. This is much faster than reading files one by one.
+    IMPORTANT: The repository has ALREADY been cloned and mapped to a temporary directory for you. Do NOT try to use 'git_clone' or any external tools.
+    Use 'get_full_context' as your FIRST action. If the code is truncated, use 'read_code' to follow the logic into specific files.
 
 {knowledge_str}
 {blackboard_str}
@@ -117,7 +119,7 @@ Current World Model:
 
     def get_correction_prompt(self, context: AgentContext, action: Dict, observation: Any) -> str:
         prompt = super().get_correction_prompt(context, action, observation)
-        return prompt + "\nHint: If code reading failed, check if the file path is correct or if you need to read a parent directory."
+        return prompt + "\nHint: If 'get_full_context' was successful, do NOT call it again. Start analyzing the files listed in the context using 'analyze_sast' or 'read_code'."
 
 
 class RedTeamAgent(BaseAgent):
