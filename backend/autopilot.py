@@ -325,10 +325,21 @@ If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond
 
             elif tool_name == "analyze_sast":
                 context = params.get("code_context")
+                file_path = params.get("file_path")
+                
+                # If no code snippet provided, try to load the file or use full cached context
+                if not context and file_path and self._sast_engine:
+                    context = await asyncio.to_thread(self._sast_engine.get_file_content, file_path)
+                elif not context and not file_path and self._sast_engine:
+                    context = self._sast_engine._cached_context
+                
+                if not context:
+                    return "Error: No code context could be loaded for SAST analysis. Ensure you have extracted context or passed a valid file path."
+                    
                 sinks = await asyncio.to_thread(llm.identify_sinks, context, self.llm_config)
                 for sink in sinks:
                     if self.on_finding: await self.on_finding(sink)
-                return f"SAST found {len(sinks)} potential sinks."
+                return f"SAST found {len(sinks)} potential vulnerabilities."
 
             elif tool_name == "fuzz_endpoint":
                 endpoint = params.get("endpoint_data")

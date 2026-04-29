@@ -442,13 +442,19 @@ def identify_sinks(code_context: str, llm_config: Optional[Dict] = None) -> List
     {code_context}
     
     --- TASK ---
-    Analyze the provided source code for high-impact security vulnerabilities. 
+    Analyze the provided source code for high-impact security vulnerabilities, explicitly focusing on the OWASP Top 10. 
     Focus on:
-    1. Broken Access Control (Insecure Direct Object References, missing auth guards).
-    2. Injection (SQLi, NoSQLi, Command Injection, XSS).
-    3. Server-Side Request Forgery (SSRF) and Insecure Deserialization.
-    4. Prototype Pollution and Logic Flaws in JavaScript/TypeScript.
-    5. Insecure handling of secrets or PII.
+    1. Broken Access Control (IDOR, missing auth guards, privilege escalation).
+    2. Cryptographic Failures (hardcoded secrets, weak encryption, predictable tokens).
+    3. Injection (SQLi, NoSQLi, Command Injection, XSS, LDAP Injection).
+    4. Insecure Design (logic flaws, business logic bypasses, lack of rate limiting).
+    5. Security Misconfiguration (missing security headers, verbose errors, default credentials).
+    6. Vulnerable and Outdated Components (known CVEs in libraries/dependencies).
+    7. Identification and Authentication Failures (session fixation, weak password policies).
+    8. Software and Data Integrity Failures (insecure CI/CD, insecure deserialization).
+    9. Security Logging and Monitoring Failures (insufficient logging for critical actions).
+    10. Server-Side Request Forgery (SSRF).
+    11. Prototype Pollution, Race Conditions, and memory safety issues.
 
     --- FINDING REQUIREMENTS ---
     For each discovery, provide a detailed finding object with:

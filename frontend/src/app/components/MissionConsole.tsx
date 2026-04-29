@@ -28,7 +28,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
   const [hitlRequest, setHitlRequest] = useState<{ id: string, question: string } | null>(null);
   const [hitlAnswer, setHitlAnswer] = useState("");
   const [isRunning, setIsRunning] = useState(false);
-  const [missionGoal] = useState("Find and verify high-severity vulnerabilities.");
+  const [missionGoal] = useState("Find and verify OWASP Top 10 vulnerabilities and other high-severity risks.");
   const [error, setError] = useState<string | null>(null);
   const [expandedFindings, setExpandedFindings] = useState<Set<string>>(new Set());
   const ws = useRef<WebSocket | null>(null);
@@ -132,6 +132,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
         setError(data.error);
         setIsRunning(false);
         setLastAction("Error encountered.");
+        addEvent("system", `🚨 Error: ${data.error}`);
       }
     };
 
@@ -308,7 +309,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
 
         {/* Event List */}
         {events
-          .filter(ev => ["finding", "system", "hitl_request"].includes(ev.type))
+          .filter(ev => ["finding", "system", "hitl_request", "thought", "action", "blackboard_note"].includes(ev.type))
           .map((ev) => (
             <div key={ev.id} className="group animate-in fade-in slide-in-from-bottom-2 duration-300">
             {ev.type === "system" ? (
@@ -509,10 +510,8 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-3 text-neutral-500">
-                <div className="h-[1px] flex-1 bg-neutral-800" />
-                <span className="text-[10px] uppercase font-bold tracking-widest whitespace-nowrap">{ev.message}</span>
-                <div className="h-[1px] flex-1 bg-neutral-800" />
+              <div className="flex text-neutral-500 bg-neutral-900/50 p-3 rounded-lg border border-neutral-800/50">
+                <span className="text-[11px] font-mono tracking-tight break-words whitespace-pre-wrap">{ev.message}</span>
               </div>
             )}
           </div>
