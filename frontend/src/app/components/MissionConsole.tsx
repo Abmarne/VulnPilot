@@ -1,16 +1,27 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Zap, X, Shield, Activity, Target } from "lucide-react";
+import { Zap, X, Shield, Activity } from "lucide-react";
 import type { LLMConfig } from "./ModelSettings";
 
 const AUTOPILOT_WS = "ws://localhost:8000/api/autopilot/ws";
+
+type MissionPayload = {
+  severity?: string;
+  vulnerability_type?: string;
+  explanation?: string;
+  impact?: string;
+  exploit_scenario?: string;
+  manual_poc?: string;
+  remediation_steps?: string;
+  [key: string]: unknown;
+};
 
 type MissionEvent = {
   id: string;
   type: "thought" | "action" | "finding" | "system" | "blackboard_note" | "hitl_request";
   message: string;
-  payload?: any;
+  payload?: MissionPayload;
   timestamp: string;
 };
 
@@ -24,7 +35,7 @@ type MissionConsoleProps = {
 
 export function MissionConsole({ target, sessionCookie, onClose, llmConfig, autoStart }: MissionConsoleProps) {
   const [events, setEvents] = useState<MissionEvent[]>([]);
-  const [blackboardNotes, setBlackboardNotes] = useState<string[]>([]);
+  const [, setBlackboardNotes] = useState<string[]>([]);
   const [hitlRequest, setHitlRequest] = useState<{ id: string, question: string } | null>(null);
   const [hitlAnswer, setHitlAnswer] = useState("");
   const [isRunning, setIsRunning] = useState(false);
@@ -35,7 +46,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
   const feedRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const [lastAction, setLastAction] = useState<string>("Initializing...");
-  const hasAutoStarted = useRef(false); // guard against StrictMode double-mount
+
 
   // Cleanup WebSocket on unmount
   useEffect(() => {
@@ -63,7 +74,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
     scrollToBottom();
   }, [events, scrollToBottom]);
 
-  const addEvent = (type: MissionEvent["type"], message: string, payload?: any) => {
+  const addEvent = (type: MissionEvent["type"], message: string, payload?: MissionPayload) => {
     setEvents((prev) => [
       ...prev,
       {
@@ -141,7 +152,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
       setIsRunning(false);
     };
     socket.onclose = () => setIsRunning(false);
-  }, [target, missionGoal, sessionCookie, llmConfig]);
+  }, [isRunning, target, missionGoal, sessionCookie, llmConfig]);
 
   // Auto-start when launched from parent
   useEffect(() => {

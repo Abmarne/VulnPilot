@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Upload, Terminal, FileCode, X, Search } from "lucide-react";
 
 type SourceHubProps = {
-  onImport: (type: "har" | "curl" | "openapi", data: any) => void;
+  onImport: (type: "har" | "curl" | "openapi", data: string | File) => void;
   isOpen: boolean;
   onClose: () => void;
   target: string;
@@ -12,7 +12,6 @@ type SourceHubProps = {
 
 export function SourceHub({ onImport, isOpen, onClose, target }: SourceHubProps) {
   const [curl, setCurl] = useState("");
-  const [loading, setLoading] = useState(false);
 
   if (!isOpen) return null;
 

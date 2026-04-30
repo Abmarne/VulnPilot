@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Search, Shield, Activity, List, LayoutPanelLeft, Clock, Zap, AlertTriangle, ShieldCheck } from "lucide-react";
 import { MissionConsole } from "./components/MissionConsole";
 import { ModelSettings, LLMConfig } from "./components/ModelSettings";
@@ -8,24 +8,19 @@ import { SourceHub } from "./components/SourceHub";
 
 const API_BASE = "http://localhost:8000";
 
-type Finding = {
-  vulnerability_type?: string;
-  severity?: string;
-  explanation?: string;
-  tutor_explanation?: string;
-  url?: string;
-  file_path?: string;
-  manual_poc?: string;
-  is_verified?: boolean;
-};
-
 export default function Home() {
   const [target, setTarget] = useState("");
-  const [sessionCookie, setSessionCookie] = useState("");
+  const [sessionCookie] = useState("");
   const [showAutopilot, setShowAutopilot] = useState(false);
   const [showSourceHub, setShowSourceHub] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [pastScans, setPastScans] = useState<any[]>([]);
+  const [pastScans, setPastScans] = useState<{
+    id: string;
+    timestamp: string;
+    target: string;
+    finding_count: number;
+    [key: string]: unknown;
+  }[]>([]);
 
   // LLM Configuration (Defaults to Groq as approved)
   const [llmConfig, setLlmConfig] = useState<LLMConfig>({
@@ -54,6 +49,7 @@ export default function Home() {
     const saved = localStorage.getItem("vp_llm_config");
     if (saved) {
       try {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setLlmConfig(JSON.parse(saved));
       } catch (e) {
         console.error("Failed to load LLM config", e);
@@ -66,7 +62,7 @@ export default function Home() {
     return () => window.removeEventListener("scan_completed", handleRefresh);
   }, []);
 
-  const handleImport = async (type: string, data: any) => {
+  const handleImport = async (type: string, data: string | File) => {
     if (!target.trim()) {
       alert("Please enter a target project name or URL first.");
       return;
@@ -76,7 +72,7 @@ export default function Home() {
     if (type === "har" || type === "openapi") {
       formData.append("file", data);
       formData.append("target", target.trim());
-      formData.append("name", data.name || type);
+      formData.append("name", (data as File).name || type);
       
       const endpoint = type === "har" ? "import-har" : "import-openapi";
       await fetch(`${API_BASE}/api/profiles/${endpoint}`, { method: "POST", body: formData });
@@ -288,7 +284,7 @@ export default function Home() {
   );
 }
 
-function X(props: any) {
+function X(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg {...props} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

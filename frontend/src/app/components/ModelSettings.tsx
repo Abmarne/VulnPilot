@@ -37,11 +37,11 @@ export function ModelSettings({
     onConfigChange(config);
   }, [config, onConfigChange]);
 
-  const handleProviderChange = (providerId: any) => {
+  const handleProviderChange = (providerId: string) => {
     const provider = PROVIDERS.find(p => p.id === providerId);
     setConfig({
       ...config,
-      provider: providerId,
+      provider: providerId as LLMConfig["provider"],
       model: provider?.defaultModel || ""
     });
   };
