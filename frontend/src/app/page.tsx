@@ -6,7 +6,14 @@ import { MissionConsole } from "./components/MissionConsole";
 import { ModelSettings, LLMConfig } from "./components/ModelSettings";
 import { SourceHub } from "./components/SourceHub";
 
-const API_BASE = "http://localhost:8000";
+const getApiBase = () => {
+  if (typeof window === "undefined") return "http://localhost:8000";
+  // If we are on localhost:3000 (Next.js default), assume backend is on 8000
+  if (window.location.hostname === "localhost") return "http://localhost:8000";
+  return window.location.origin;
+};
+
+const API_BASE = getApiBase();
 
 export default function Home() {
   const [target, setTarget] = useState("");
@@ -23,6 +30,7 @@ export default function Home() {
   }[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [selectedScan, setSelectedScan] = useState<any>(null);
 
   // LLM Configuration (Defaults to Groq as approved)
   const [llmConfig, setLlmConfig] = useState<LLMConfig>({
@@ -54,7 +62,6 @@ export default function Home() {
     const saved = localStorage.getItem("vp_llm_config");
     if (saved) {
       try {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
         setLlmConfig(JSON.parse(saved));
       } catch (e) {
         console.error("Failed to load LLM config", e);
@@ -98,6 +105,18 @@ export default function Home() {
       alert(err instanceof Error ? err.message : "An error occurred during import");
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  const handleViewScan = async (scanId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/history/${scanId}`);
+      if (!res.ok) throw new Error("Failed to load scan details");
+      const data = await res.json();
+      setSelectedScan(data);
+    } catch (err) {
+      console.error(err);
+      alert("Could not load mission details.");
     }
   };
 
@@ -160,15 +179,19 @@ export default function Home() {
               <button 
                 onClick={() => {
                   setShowAutopilot(true);
-                  // Allow React to render before scrolling
                   setTimeout(() => {
                     document.getElementById("mission-hub")?.scrollIntoView({ behavior: "smooth", block: "start" });
                   }, 100);
                 }}
-                disabled={!target.trim() || showAutopilot}
-                className="h-16 px-10 rounded-xl bg-emerald-500 text-neutral-950 font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-emerald-500/10 disabled:opacity-50 disabled:grayscale disabled:hover:scale-100"
+                disabled={!target.trim() || showAutopilot || isImporting}
+                className="h-16 px-10 rounded-xl bg-emerald-500 text-neutral-950 font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-emerald-500/10 disabled:opacity-50 disabled:grayscale disabled:hover:scale-100 flex items-center justify-center gap-3"
               >
-                Launch Safety Audit
+                {isImporting ? (
+                  <div className="w-5 h-5 border-2 border-neutral-950 border-t-transparent animate-spin rounded-full" />
+                ) : (
+                  <Zap className="w-5 h-5" />
+                )}
+                {isImporting ? "Processing..." : "Launch Safety Audit"}
               </button>
           </div>
           
@@ -290,7 +313,11 @@ export default function Home() {
                 <div className="text-center py-20 text-neutral-600 italic text-sm">No missions archived yet.</div>
               ) : (
                 pastScans.map((scan) => (
-                  <div key={scan.id} className="group rounded-xl border border-neutral-800 bg-neutral-900/40 p-4 hover:border-emerald-500/50 transition-all cursor-pointer">
+                  <div 
+                    key={scan.id} 
+                    onClick={() => handleViewScan(scan.id)}
+                    className="group rounded-xl border border-neutral-800 bg-neutral-900/40 p-4 hover:border-emerald-500/50 transition-all cursor-pointer"
+                  >
                     <div className="font-mono text-[10px] text-neutral-600 uppercase mb-2">{new Date(scan.timestamp).toLocaleString()}</div>
                     <div className="font-bold text-white truncate mb-1">{scan.target}</div>
                     <div className="text-xs text-emerald-500 font-bold uppercase tracking-widest">{scan.finding_count} Security Alerts Found</div>
@@ -301,10 +328,34 @@ export default function Home() {
           </div>
         </div>
       )}
-    </main>
-  );
-}
 
+      {/* Selected Scan View Overlay */}
+      {selectedScan && (
+        <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 md:p-8 animate-in fade-in duration-300">
+          <div className="w-full max-w-5xl h-[90vh] bg-neutral-950 border border-neutral-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl">
+            <div className="p-6 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/30">
+              <div>
+                <h2 className="text-xl font-black text-white uppercase tracking-tighter">Mission Debrief</h2>
+                <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold">Project: {selectedScan.target}</p>
+              </div>
+              <button 
+                onClick={() => setSelectedScan(null)}
+                className="p-2 hover:bg-neutral-800 rounded-lg transition-colors"
+              >
+                <X className="w-6 h-6 text-neutral-400" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden p-6">
+              <MissionConsole 
+                target={selectedScan.target} 
+                onClose={() => setSelectedScan(null)} 
+                llmConfig={llmConfig}
+                readOnlyData={selectedScan}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -4,15 +4,15 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Zap, X, Shield, Activity } from "lucide-react";
 import type { LLMConfig } from "./ModelSettings";
 
-const getWsUrl = () => {
-  if (typeof window === "undefined") return "ws://localhost:8000/api/autopilot/ws";
+const getWsUrl = (mode: "autopilot" | "standard" = "autopilot") => {
+  if (typeof window === "undefined") return `ws://localhost:8000/api/${mode}/ws`;
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  // Check if we are in dev mode or prod
   const host = window.location.hostname === "localhost" ? "localhost:8000" : window.location.host;
-  return `${protocol}//${host}/api/autopilot/ws`;
+  return `${protocol}//${host}/api/${mode}/ws`;
 };
 
-const AUTOPILOT_WS = getWsUrl();
+const AUTOPILOT_WS = getWsUrl("autopilot");
+const SCAN_WS = getWsUrl("standard");
 
 type MissionPayload = {
   severity?: string;
@@ -39,29 +39,70 @@ type MissionConsoleProps = {
   onClose?: () => void;
   llmConfig?: LLMConfig;
   autoStart?: boolean;
+  readOnlyData?: any;
+  mode?: "autopilot" | "standard";
 };
 
-export function MissionConsole({ target, sessionCookie, onClose, llmConfig, autoStart }: MissionConsoleProps) {
+export function MissionConsole({ 
+  target, 
+  sessionCookie, 
+  onClose, 
+  llmConfig, 
+  autoStart, 
+  readOnlyData, 
+  mode = "autopilot" 
+}: MissionConsoleProps) {
   const [events, setEvents] = useState<MissionEvent[]>([]);
-  const [, setBlackboardNotes] = useState<string[]>([]);
-  const [hitlRequest, setHitlRequest] = useState<{ id: string, question: string } | null>(null);
-  const [hitlAnswer, setHitlAnswer] = useState("");
+  const [lastAction, setLastAction] = useState<string>(readOnlyData ? "Mission Debrief" : "Initializing...");
+  const [blackboardNotes, setBlackboardNotes] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState(false);
-  const [missionGoal] = useState("Find and verify OWASP Top 10 vulnerabilities and other high-severity risks.");
   const [error, setError] = useState<string | null>(null);
+  const [hitlRequest, setHitlRequest] = useState<{ id: string; question: string } | null>(null);
+  const [hitlAnswer, setHitlAnswer] = useState("");
   const [expandedFindings, setExpandedFindings] = useState<Set<string>>(new Set());
+  const [missionGoal] = useState("Full vulnerability assessment");
+
   const ws = useRef<WebSocket | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
-  const [lastAction, setLastAction] = useState<string>("Initializing...");
-
 
   // Cleanup WebSocket on unmount
+  // Handle readOnlyData or autoStart
   useEffect(() => {
-    return () => {
-      ws.current?.close();
-    };
-  }, []);
+    if (readOnlyData) {
+      // Map logs and findings to events
+      const historicEvents: MissionEvent[] = [];
+      
+      (readOnlyData.logs || []).forEach((log: any, idx: number) => {
+        historicEvents.push({
+          id: `log-${idx}`,
+          type: log.stage === "autopilot" ? "thought" : (log.stage === "error" ? "thought" : "system"),
+          message: log.message,
+          timestamp: ""
+        });
+        
+        if (log.message.startsWith("[System] Blackboard updated:")) {
+           const note = log.message.replace("[System] Blackboard updated: ", "").replace(/['"]/g, "");
+           setBlackboardNotes(prev => prev.includes(note) ? prev : [...prev, note]);
+        }
+      });
+      
+      (readOnlyData.findings || []).forEach((f: any, idx: number) => {
+        historicEvents.push({
+          id: `finding-${idx}`,
+          type: "finding",
+          message: f.vulnerability_type || "Finding",
+          payload: f,
+          timestamp: ""
+        });
+      });
+      
+      setEvents(historicEvents);
+      setIsRunning(false);
+    } else if (target && (autoStart || events.length === 0)) {
+       startMission();
+    }
+  }, [target, readOnlyData]);
 
   // Smart scroll: only snap to bottom if user was already at bottom
   const scrollToBottom = useCallback(() => {
@@ -96,17 +137,15 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
   };
 
   const startMission = useCallback(() => {
-    if (isRunning) return;
-    
-    // Only close if already open — don't close a still-connecting socket
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.close();
-    }
-    setEvents([]);
-    setError(null);
+    if (!target) return;
     setIsRunning(true);
+    setEvents([]);
+    setBlackboardNotes([]);
+    setError(null);
+    setLastAction("Connecting to engine...");
 
-    const socket = new WebSocket(AUTOPILOT_WS);
+    const socketUrl = mode === "autopilot" ? AUTOPILOT_WS : SCAN_WS;
+    const socket = new WebSocket(socketUrl);
     ws.current = socket;
 
     socket.onopen = () => {
@@ -164,7 +203,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
       setIsRunning(false);
     };
     socket.onclose = () => setIsRunning(false);
-  }, [isRunning, target, missionGoal, sessionCookie, llmConfig]);
+  }, [target, mode, llmConfig, sessionCookie, missionGoal, addEvent]);
 
   // Auto-start when launched from parent
   useEffect(() => {
@@ -336,11 +375,17 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
           .map((ev) => (
             <div key={ev.id} className="group animate-in fade-in slide-in-from-bottom-2 duration-300">
             {ev.type === "system" ? (
-              <div className="flex items-center gap-3 py-2">
-                <div className="h-px flex-1 bg-neutral-800" />
-                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest px-3">{ev.message}</span>
-                <div className="h-px flex-1 bg-neutral-800" />
-              </div>
+              ev.message.startsWith("🚀") || ev.message.startsWith("🏁") || ev.message.startsWith("🚨") ? (
+                <div className="flex items-center gap-3 py-2">
+                  <div className="h-px flex-1 bg-neutral-800" />
+                  <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest px-3">{ev.message}</span>
+                  <div className="h-px flex-1 bg-neutral-800" />
+                </div>
+              ) : (
+                <div className="flex text-neutral-400 bg-neutral-900/30 p-3 rounded-lg border border-white/5 italic">
+                  <span className="text-[10px] font-mono tracking-tight break-words whitespace-pre-wrap opacity-60">{ev.message}</span>
+                </div>
+              )
             ) : ev.type === "finding" ? (
               <div
                 className={`group/card bg-gradient-to-br border rounded-2xl p-4 transition-all duration-500 overflow-hidden ${
@@ -522,6 +567,7 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
                     onClick={() => {
                       if (ws.current) {
                         ws.current.send(JSON.stringify({ type: "HITL_RESPONSE", answer: hitlAnswer }));
+                        setEvents(prev => prev.map(e => e.type === "hitl_request" && e.message === ev.message ? { ...e, type: "system", message: `RESOLVED: ${ev.message}\nAnswer: ${hitlAnswer}` } : e));
                         setHitlAnswer("");
                         setHitlRequest(null);
                       }
