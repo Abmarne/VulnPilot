@@ -4,7 +4,15 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Zap, X, Shield, Activity } from "lucide-react";
 import type { LLMConfig } from "./ModelSettings";
 
-const AUTOPILOT_WS = "ws://localhost:8000/api/autopilot/ws";
+const getWsUrl = () => {
+  if (typeof window === "undefined") return "ws://localhost:8000/api/autopilot/ws";
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  // Check if we are in dev mode or prod
+  const host = window.location.hostname === "localhost" ? "localhost:8000" : window.location.host;
+  return `${protocol}//${host}/api/autopilot/ws`;
+};
+
+const AUTOPILOT_WS = getWsUrl();
 
 type MissionPayload = {
   severity?: string;
@@ -125,7 +133,11 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
         setLastAction("Critical finding identified!");
       } else if (data.type === "blackboard_note") {
         const note = data.message.replace("[System] Blackboard updated: ", "").replace(/['"]/g, "");
-        setBlackboardNotes((prev) => [...prev, note]);
+        setBlackboardNotes((prev) => {
+          // Avoid duplicate notes
+          if (prev.includes(note)) return prev;
+          return [...prev, note];
+        });
         addEvent("blackboard_note", data.message);
       } else if (data.type === "hitl_request") {
         setHitlRequest({ id: Math.random().toString(36).substring(2, 11), question: data.question || "The agent needs your input to continue." });
@@ -556,26 +568,29 @@ export function MissionConsole({ target, sessionCookie, onClose, llmConfig, auto
       </div>{/* closes main console flex-col div */}
       
     {/* Strategic Blackboard Panel */}
-      {/* Strategic Blackboard Panel Hidden as per user request */}
-      {/* 
       {blackboardNotes.length > 0 && (
-        <div className="w-[300px] hidden md:flex flex-col h-full bg-neutral-900/40 backdrop-blur-md border border-neutral-800 rounded-2xl overflow-hidden shadow-xl animate-in fade-in slide-in-from-right-4 duration-500">
-          <div className="px-5 py-4 border-b border-neutral-800 bg-neutral-900/60 flex items-center gap-2">
-            <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-            </svg>
-            <h3 className="text-xs font-black uppercase tracking-widest text-neutral-300">Strategic Blackboard</h3>
+        <div className="w-[320px] hidden lg:flex flex-col h-full bg-neutral-900/40 backdrop-blur-md border border-neutral-800 rounded-2xl overflow-hidden shadow-xl animate-in fade-in slide-in-from-right-4 duration-500">
+          <div className="px-5 py-4 border-b border-neutral-800 bg-neutral-900/60 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-300">Strategic Blackboard</h3>
+            </div>
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-white/10">
             {blackboardNotes.map((note, idx) => (
-              <div key={idx} className="bg-white/5 border border-white/5 rounded-xl p-3 text-sm text-neutral-300 shadow-inner">
-                {note}
+              <div key={idx} className="group/note bg-neutral-950/40 border border-white/5 rounded-xl p-3 text-xs text-neutral-400 shadow-inner hover:border-emerald-500/20 transition-colors animate-in fade-in slide-in-from-top-1 duration-300">
+                <div className="flex gap-2">
+                  <span className="text-emerald-500/40 font-mono mt-0.5">»</span>
+                  <span className="leading-relaxed group-hover/note:text-neutral-200 transition-colors">{note}</span>
+                </div>
               </div>
             ))}
           </div>
         </div>
       )}
-      */}
     </div>
   );
 }

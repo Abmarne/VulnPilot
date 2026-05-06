@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Search, Shield, Activity, List, LayoutPanelLeft, Clock, Zap, AlertTriangle, ShieldCheck } from "lucide-react";
+import { Search, Shield, Activity, List, LayoutPanelLeft, Clock, Zap, AlertTriangle, ShieldCheck, X } from "lucide-react";
 import { MissionConsole } from "./components/MissionConsole";
 import { ModelSettings, LLMConfig } from "./components/ModelSettings";
 import { SourceHub } from "./components/SourceHub";
@@ -21,6 +21,8 @@ export default function Home() {
     finding_count: number;
     [key: string]: unknown;
   }[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   // LLM Configuration (Defaults to Groq as approved)
   const [llmConfig, setLlmConfig] = useState<LLMConfig>({
@@ -35,12 +37,15 @@ export default function Home() {
   };
 
   const fetchHistory = async () => {
+    setIsLoadingHistory(true);
     try {
       const response = await fetch(`${API_BASE}/api/history`);
       const data = await response.json();
       setPastScans(data.scans || []);
     } catch (err) {
       console.error("Failed to fetch history", err);
+    } finally {
+      setIsLoadingHistory(false);
     }
   };
 
@@ -68,22 +73,32 @@ export default function Home() {
       return;
     }
     
-    const formData = new FormData();
-    if (type === "har" || type === "openapi") {
-      formData.append("file", data);
-      formData.append("target", target.trim());
-      formData.append("name", (data as File).name || type);
-      
-      const endpoint = type === "har" ? "import-har" : "import-openapi";
-      await fetch(`${API_BASE}/api/profiles/${endpoint}`, { method: "POST", body: formData });
-    } else if (type === "curl") {
-       await fetch(`${API_BASE}/api/profiles/import-curl`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target: target.trim(), curl: data, name: "Single Event Study" }),
-      });
+    setIsImporting(true);
+    try {
+      const formData = new FormData();
+      if (type === "har" || type === "openapi") {
+        formData.append("file", data);
+        formData.append("target", target.trim());
+        formData.append("name", (data as File).name || type);
+        
+        const endpoint = type === "har" ? "import-har" : "import-openapi";
+        const res = await fetch(`${API_BASE}/api/profiles/${endpoint}`, { method: "POST", body: formData });
+        if (!res.ok) throw new Error(`Failed to import ${type}`);
+      } else if (type === "curl") {
+         const res = await fetch(`${API_BASE}/api/profiles/import-curl`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target: target.trim(), curl: data, name: "Single Event Study" }),
+        });
+        if (!res.ok) throw new Error("Failed to import cURL");
+      }
+      setShowSourceHub(false);
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : "An error occurred during import");
+    } finally {
+      setIsImporting(false);
     }
-    setShowSourceHub(false);
   };
 
   return (
@@ -259,13 +274,19 @@ export default function Home() {
           <div className="h-full w-full max-w-md border-l border-neutral-800 bg-neutral-950 p-8 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
             <div className="flex items-center justify-between mb-10">
               <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Mission Archive</h2>
-              <button onClick={() => setHistoryOpen(false)} className="p-2 hover:bg-neutral-800 rounded-lg">
-                 <X className="w-6 h-6 text-neutral-500" />
+              <button onClick={() => setHistoryOpen(false)} className="p-2 hover:bg-neutral-800 rounded-lg transition-colors">
+                 <X className="w-6 h-6 text-neutral-500 hover:text-white" />
               </button>
             </div>
             
             <div className="flex-1 overflow-y-auto space-y-4">
-              {pastScans.length === 0 ? (
+              {isLoadingHistory ? (
+                <div className="flex flex-col gap-4 animate-pulse">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-24 bg-neutral-900/50 rounded-xl border border-neutral-800" />
+                  ))}
+                </div>
+              ) : pastScans.length === 0 ? (
                 <div className="text-center py-20 text-neutral-600 italic text-sm">No missions archived yet.</div>
               ) : (
                 pastScans.map((scan) => (
@@ -284,10 +305,6 @@ export default function Home() {
   );
 }
 
-function X(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg {...props} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-    </svg>
+    </main>
   );
 }

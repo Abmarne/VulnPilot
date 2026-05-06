@@ -12,6 +12,7 @@ type SourceHubProps = {
 
 export function SourceHub({ onImport, isOpen, onClose, target }: SourceHubProps) {
   const [curl, setCurl] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
 
   if (!isOpen) return null;
 
@@ -37,12 +38,22 @@ export function SourceHub({ onImport, isOpen, onClose, target }: SourceHubProps)
           <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Network Traffic (HAR)</h3>
           <label className="flex flex-col items-center justify-center border-2 border-dashed border-neutral-800 rounded-xl p-6 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all cursor-pointer group">
             <Upload className="w-8 h-8 text-neutral-600 group-hover:text-emerald-500 mb-2" />
-            <span className="text-xs text-neutral-500 group-hover:text-neutral-300 font-medium">Upload .har file</span>
+            <span className="text-xs text-neutral-500 group-hover:text-neutral-300 font-medium">
+              {isImporting ? "Processing..." : "Upload .har file"}
+            </span>
             <input 
               type="file" 
               className="hidden" 
               accept=".har" 
-              onChange={(e) => e.target.files?.[0] && onImport("har", e.target.files[0])}
+              disabled={isImporting}
+              onChange={async (e) => {
+                if (e.target.files?.[0]) {
+                  setIsImporting(true);
+                  await onImport("har", e.target.files[0]);
+                  setIsImporting(false);
+                  e.target.value = "";
+                }
+              }}
             />
           </label>
         </section>
@@ -58,10 +69,16 @@ export function SourceHub({ onImport, isOpen, onClose, target }: SourceHubProps)
               className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-3 text-xs font-mono min-h-[100px] focus:outline-none focus:border-teal-500/50 transition-colors"
             />
             <button 
-              onClick={() => { onImport("curl", curl); setCurl(""); }}
-              className="absolute right-2 bottom-2 p-1.5 bg-teal-500 text-neutral-950 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={async () => { 
+                setIsImporting(true);
+                await onImport("curl", curl); 
+                setCurl(""); 
+                setIsImporting(false);
+              }}
+              disabled={!curl.trim() || isImporting}
+              className="absolute right-2 bottom-2 p-1.5 bg-teal-500 text-neutral-950 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
             >
-              <Terminal className="w-4 h-4" />
+              {isImporting ? <div className="w-4 h-4 border-2 border-neutral-950 border-t-transparent animate-spin rounded-full" /> : <Terminal className="w-4 h-4" />}
             </button>
           </div>
         </section>
@@ -72,14 +89,22 @@ export function SourceHub({ onImport, isOpen, onClose, target }: SourceHubProps)
           <label className="flex items-center gap-3 p-4 border border-neutral-800 rounded-xl hover:bg-neutral-800/50 transition-all cursor-pointer">
             <FileCode className="w-6 h-6 text-indigo-500" />
             <div className="flex-1">
-              <div className="text-sm font-bold">Import OpenAPI</div>
+              <div className="text-sm font-bold">{isImporting ? "Importing..." : "Import OpenAPI"}</div>
               <div className="text-[10px] text-neutral-500 uppercase tracking-tight">Swagger, YAML or JSON</div>
             </div>
             <input 
               type="file" 
               className="hidden" 
               accept=".json,.yaml,.yml"
-              onChange={(e) => e.target.files?.[0] && onImport("openapi", e.target.files[0])}
+              disabled={isImporting}
+              onChange={async (e) => {
+                if (e.target.files?.[0]) {
+                  setIsImporting(true);
+                  await onImport("openapi", e.target.files[0]);
+                  setIsImporting(false);
+                  e.target.value = "";
+                }
+              }}
             />
           </label>
         </section>
