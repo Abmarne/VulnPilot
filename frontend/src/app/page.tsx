@@ -166,7 +166,7 @@ export default function Home() {
         {/* The Clean Audit Bar */}
         <div className="relative group animate-in fade-in slide-in-from-bottom-4 duration-1000 delay-200">
           <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500/20 to-teal-500/20 rounded-2xl blur opacity-25 group-hover:opacity-100 transition duration-1000 group-hover:duration-200" />
-          <div className="relative flex flex-col md:flex-row items-stretch gap-2 bg-neutral-900/80 border border-neutral-800 rounded-2xl p-2.5 shadow-2xl backdrop-blur-xl">
+          <div className="relative flex flex-col md:flex-row items-stretch gap-2 bg-neutral-900/90 border border-neutral-800 group-hover:border-emerald-500/30 rounded-2xl p-2.5 shadow-2xl backdrop-blur-xl transition-all duration-500">
              <div className="flex-1 relative flex items-center">
                 <Search className="absolute left-5 w-6 h-6 text-neutral-500 group-hover:text-emerald-400 transition-colors" />
                 <input 
@@ -184,12 +184,12 @@ export default function Home() {
                   }, 100);
                 }}
                 disabled={!target.trim() || showAutopilot || isImporting}
-                className="h-16 px-10 rounded-xl bg-emerald-500 text-neutral-950 font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-emerald-500/10 disabled:opacity-50 disabled:grayscale disabled:hover:scale-100 flex items-center justify-center gap-3"
+                className="h-16 px-10 rounded-xl bg-emerald-500 text-neutral-950 font-black uppercase tracking-widest text-sm hover:bg-emerald-400 hover:shadow-[0_0_20px_rgba(16,185,129,0.4)] active:scale-[0.98] transition-all shadow-xl shadow-emerald-500/10 disabled:opacity-50 disabled:grayscale disabled:hover:scale-100 flex items-center justify-center gap-3"
               >
                 {isImporting ? (
                   <div className="w-5 h-5 border-2 border-neutral-950 border-t-transparent animate-spin rounded-full" />
                 ) : (
-                  <Zap className="w-5 h-5" />
+                  <Zap className={`w-5 h-5 ${!target.trim() ? "" : "animate-pulse"}`} />
                 )}
                 {isImporting ? "Processing..." : "Launch Safety Audit"}
               </button>
@@ -198,14 +198,14 @@ export default function Home() {
           <div className="mt-6 flex flex-wrap justify-center items-center gap-6">
             <button 
               onClick={() => setShowSourceHub(true)}
-              className="flex items-center gap-2 text-xs font-bold text-neutral-500 hover:text-white uppercase tracking-widest transition-colors"
+              className="flex items-center gap-2 text-xs font-bold text-neutral-500 hover:text-white uppercase tracking-widest transition-colors group/btn"
             >
-              <Zap className="w-4 h-4 text-teal-400" />
+              <Zap className="w-4 h-4 text-teal-400 group-hover/btn:animate-bounce" />
               Upload Advanced Context
             </button>
             <div className="h-1 w-1 rounded-full bg-neutral-800" />
             <div className="text-xs font-bold text-neutral-600 uppercase tracking-widest flex items-center gap-2">
-               <ShieldCheck className="w-4 h-4" />
+               <ShieldCheck className="w-4 h-4 text-emerald-500/50" />
                Certified for Non-IT Users
             </div>
           </div>

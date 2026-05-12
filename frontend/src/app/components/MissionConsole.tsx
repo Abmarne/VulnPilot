@@ -127,7 +127,7 @@ export function MissionConsole({
     setEvents((prev) => [
       ...prev,
       {
-        id: Math.random().toString(36).substring(2, 11),
+        id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11),
         type,
         message,
         payload,
@@ -179,7 +179,10 @@ export function MissionConsole({
         });
         addEvent("blackboard_note", data.message);
       } else if (data.type === "hitl_request") {
-        setHitlRequest({ id: Math.random().toString(36).substring(2, 11), question: data.question || "The agent needs your input to continue." });
+        setHitlRequest({ 
+          id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11), 
+          question: data.question || "The agent needs your input to continue." 
+        });
         addEvent("hitl_request", `Human Intercept Requested: ${data.question}`);
         setLastAction("Waiting for user input...");
       } else if (data.type === "mission_complete") {
@@ -205,7 +208,7 @@ export function MissionConsole({
     socket.onclose = () => setIsRunning(false);
   }, [target, mode, llmConfig, sessionCookie, missionGoal, addEvent]);
 
-  // Auto-start when launched from parent
+  // Auto-start and WebSocket cleanup
   useEffect(() => {
     let active = true;
     if (autoStart && target) {
@@ -213,11 +216,15 @@ export function MissionConsole({
       const timer = setTimeout(() => {
         if (active) startMission();
       }, 150);
-      return () => {
-        active = false;
-        clearTimeout(timer);
-      };
     }
+    
+    return () => {
+      active = false;
+      if (ws.current) {
+        ws.current.close();
+        ws.current = null;
+      }
+    };
   }, [autoStart, target, startMission]);
 
   const toggleFinding = (id: string) => {
@@ -627,9 +634,9 @@ export function MissionConsole({
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-white/10">
             {blackboardNotes.map((note, idx) => (
-              <div key={idx} className="group/note bg-neutral-950/40 border border-white/5 rounded-xl p-3 text-xs text-neutral-400 shadow-inner hover:border-emerald-500/20 transition-colors animate-in fade-in slide-in-from-top-1 duration-300">
+              <div key={idx} className="group/note bg-neutral-950/40 border border-white/5 rounded-xl p-3 text-xs text-neutral-400 shadow-inner hover:border-emerald-500/20 transition-all duration-300 animate-in fade-in slide-in-from-right-2">
                 <div className="flex gap-2">
-                  <span className="text-emerald-500/40 font-mono mt-0.5">»</span>
+                  <span className="text-emerald-500/40 font-mono mt-0.5 group-hover/note:text-emerald-400 transition-colors">»</span>
                   <span className="leading-relaxed group-hover/note:text-neutral-200 transition-colors">{note}</span>
                 </div>
               </div>

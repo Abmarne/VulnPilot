@@ -193,7 +193,7 @@ class PilotOrchestrator:
                     await self._think(f"Observation suggests potential roadblock. Triggering Self-Correction Protocol (Sub-step {sub_step+1})...", persona=agent.persona_name)
                     
                     correction_prompt = agent.get_correction_prompt(self.context, action, observation)
-                    correction_response = llm._call_llm(correction_prompt, config=self.llm_config)
+                    correction_response = await asyncio.to_thread(llm._call_llm, correction_prompt, self.llm_config)
                     
                     new_thought = self._extract_reasoning(correction_response)
                     new_action = self._extract_action(correction_response)

@@ -273,7 +273,10 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as exc:
-        await emit_log(websocket, f"Error: {exc}", "error")
+        try:
+            await emit_log(websocket, f"Error: {exc}", "error")
+        except:
+            pass
         manager.disconnect(websocket)
 
 
@@ -285,12 +288,17 @@ async def autopilot_websocket(websocket: WebSocket):
     await manager.connect(websocket)
     hitl_future: Optional[asyncio.Future] = None
 
+    mission_task: Optional[asyncio.Task] = None
     try:
         while True:
             data = await websocket.receive_text()
             request_data = json.loads(data)
 
             if request_data.get("type") == "START_MISSION":
+                # Cancel existing task if any
+                if mission_task and not mission_task.done():
+                    mission_task.cancel()
+                
                 target = request_data.get("target", "")
                 goal = request_data.get("goal", "Find and verify vulnerabilities.")
                 session_cookie = request_data.get("session_cookie", None)
@@ -349,7 +357,7 @@ async def autopilot_websocket(websocket: WebSocket):
                             "finding_count": len(mission_findings)
                         }, websocket)
                     except asyncio.CancelledError:
-                        # Server reloaded mid-mission — gracefully ignore
+                        # Task was cancelled (e.g. disconnect or new mission)
                         pass
                     except WebSocketDisconnect:
                         pass
@@ -359,7 +367,7 @@ async def autopilot_websocket(websocket: WebSocket):
                         except Exception:
                             pass
                 
-                asyncio.create_task(run_mission())
+                mission_task = asyncio.create_task(run_mission())
 
             elif request_data.get("type") == "HITL_RESPONSE":
                 answer = request_data.get("answer", "")
@@ -367,9 +375,16 @@ async def autopilot_websocket(websocket: WebSocket):
                     hitl_future.set_result(answer)
 
     except WebSocketDisconnect:
+        if mission_task and not mission_task.done():
+            mission_task.cancel()
         manager.disconnect(websocket)
     except Exception as exc:
-        await manager.send_personal_message({"type": "autopilot_error", "error": str(exc)}, websocket)
+        if mission_task and not mission_task.done():
+            mission_task.cancel()
+        try:
+            await manager.send_personal_message({"type": "autopilot_error", "error": str(exc)}, websocket)
+        except:
+            pass
         manager.disconnect(websocket)
 
 
