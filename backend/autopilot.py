@@ -64,12 +64,15 @@ class PilotOrchestrator:
         self.current_agent_key = "scout" if self.is_url else "auditor"
         self.codebase_path = target if (self.is_github or not self.is_url) else None
         
-        # Create a sync wrapper for the async _think method to provide live updates from the engine
+        self._last_status = ""
+        # Create a thread-safe wrapper for the async _think method
         def engine_status_sync(msg):
+            if msg == self._last_status: return
+            self._last_status = msg
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    loop.create_task(self._think(msg, persona="Engine"))
+                    asyncio.run_coroutine_threadsafe(self._think(msg, persona="Engine"), loop)
             except:
                 pass
 
@@ -91,137 +94,118 @@ class PilotOrchestrator:
 
     async def run(self, mission_goal: str = "Find and verify as many vulnerabilities as possible."):
         """The main Agentic Loop with Reflection, Multi-Agent hand-over, and LTM Recall."""
-        print(f"[*] Mission started: {mission_goal}")
-        await self._think(f"Mission briefing received: {mission_goal}")
-        
-        # --- BOOTSTRAP: RECALL KNOWLEDGE ---
-        print("[*] Consulting long-term memory for relevant patterns...")
-        await self._think("Consulting long-term memory for relevant lessons...")
-        recalled = await asyncio.to_thread(self.memory.recall_relevant, f"{mission_goal} on {self.target}")
-        if recalled:
-            self.world_model["recalled_knowledge"] = recalled
-            await self._think(f"Recalled {len(recalled)} relevant security patterns from previous scans.")
+        try:
+            print(f"[*] Mission started: {mission_goal}")
+            await self._think(f"Mission briefing received: {mission_goal}")
             
-        # --- BOOTSTRAP: SAST PREPARATION ---
-        if self._sast_engine:
-            print("[*] Preparing codebase for SAST analysis...")
-            await self._think("Preparing codebase for SAST analysis...")
-            target_dir = await asyncio.to_thread(self._sast_engine.prepare_codebase)
-            if target_dir:
-                print(f"[*] Mapping codebase at: {target_dir}")
-                def map_files():
-                    found_files = []
-                    for root, dirs, fs in os.walk(target_dir):
-                        # Prune directories in-place for efficiency
-                        dirs[:] = [d for d in dirs if d not in ('.git', 'node_modules', '.venv', '__pycache__')]
-                        for f in fs:
-                            found_files.append(os.path.relpath(os.path.join(root, f), target_dir))
-                    return found_files
+            # --- BOOTSTRAP: RECALL KNOWLEDGE ---
+            print("[*] Consulting long-term memory for relevant patterns...")
+            await self._think("Consulting long-term memory for relevant lessons...")
+            recalled = await asyncio.to_thread(self.memory.recall_relevant, f"{mission_goal} on {self.target}")
+            if recalled:
+                self.world_model["recalled_knowledge"] = recalled
+                await self._think(f"Recalled {len(recalled)} relevant security patterns from previous scans.")
                 
-                files = await asyncio.to_thread(map_files)
-                self.world_model["code_files"] = files[:100]  # Show up to 100 files
-                print(f"[*] Codebase ready. Mapped {len(files)} files.")
-                await self._think(f"Codebase ready. Mapped {len(files)} files.")
-            else:
-                print("[!] Failed to prepare codebase.")
-                await self._think("Failed to prepare codebase. Proceeding with caution.")
-        
-        for step in range(self.max_steps):
-            agent = self.agents[self.current_agent_key]
-            
-            # --- PHASE 1: REFLECTION ---
-            print(f"[*] Phase: Reflection (Agent: {agent.persona_name})")
-            await self._think(f"Reflecting on mission state... (Current Agent: {agent.persona_name})")
-            reflection_prompt = self._build_reflection_prompt(mission_goal, agent)
-            # Offload blocking LLM call to thread to keep WebSocket alive
-            reflection = await asyncio.to_thread(llm._call_llm, reflection_prompt, self.llm_config)
-            
-            if reflection.startswith("Error:"):
-                await self._think(f"🚨 REFLECTION ERROR: {reflection}", persona="SYSTEM")
-                break
-                
-            if "HANDOVER" in reflection.upper():
-                new_agent_key = self._determine_handover(reflection)
-                if new_agent_key and new_agent_key != self.current_agent_key:
-                    await self._think(f"Strategic transition: Handing over from {agent.persona_name} to {self.agents[new_agent_key].persona_name}.")
+            # --- BOOTSTRAP: SAST PREPARATION ---
+            if self._sast_engine:
+                print("[*] Preparing codebase for SAST analysis...")
+                await self._think("Preparing codebase for SAST analysis...")
+                target_dir = await asyncio.to_thread(self._sast_engine.prepare_codebase)
+                if target_dir:
+                    print(f"[*] Mapping codebase at: {target_dir}")
+                    def map_files():
+                        found_files = []
+                        for root, dirs, fs in os.walk(target_dir):
+                            dirs[:] = [d for d in dirs if d not in ('.git', 'node_modules', '.venv', '__pycache__')]
+                            for f in fs:
+                                found_files.append(os.path.relpath(os.path.join(root, f), target_dir))
+                        return found_files
                     
-                    # CHECKPOINT: RedTeam requires explicit mention of approval if transitioning to it
-                    if new_agent_key == "redteam":
-                         await self._think("⚠️ REDTEAM CHECKPOINT: Moving to active exploitation phase.")
-                         # Since we have user 'Yes' in history, we proceed, but log the checkpoint.
-                    
-                    self.current_agent_key = new_agent_key
-                    agent = self.agents[self.current_agent_key]
-            
-            # --- PHASE 2: REASONING & ACTING ---
-            prompt = agent.get_system_prompt(self.context)
-            # Offload blocking LLM call to thread to keep WebSocket alive
-            response = await asyncio.to_thread(llm._call_llm, prompt, self.llm_config)
-            
-            if response.startswith("Error:"):
-                await self._think(f"🚨 LLM ERROR: {response}", persona="SYSTEM")
-                # Break loop to avoid infinite error spinning
-                break
-            
-            reasoning = self._extract_reasoning(response)
-            action = self._extract_action(response)
-            
-            if reasoning:
-                await self._think(reasoning, persona=agent.persona_name)
-            
-            if not action or action.get("tool") == "finish":
-                if self.current_agent_key == "redteam":
-                    await self._think("Final reports generated. Mission complete.")
-                    break
+                    files = await asyncio.to_thread(map_files)
+                    self.world_model["code_files"] = files[:100]
+                    print(f"[*] Codebase ready. Mapped {len(files)} files.")
+                    await self._think(f"Codebase ready. Mapped {len(files)} files.")
                 else:
-                    await self._think(f"{agent.persona_name} finished their tasks. Returning to Orchestrator for reassignment.")
-                    # Force a handover by making the reflection decide next agent
-                    self.current_agent_key = "auditor" if self.current_agent_key == "scout" else "redteam"
-                    continue
+                    print("[!] Failed to prepare codebase.")
+                    await self._think("Failed to prepare codebase. Proceeding with caution.")
+            
+            for step in range(self.max_steps):
+                agent = self.agents[self.current_agent_key]
+                print(f"[*] Phase: Reflection (Agent: {agent.persona_name})")
+                await self._think(f"Reflecting on mission state... (Current Agent: {agent.persona_name})")
                 
-            # Execute tool
-            tool_name = action.get("tool")
-            tool_params = action.get("params", {})
-            
-            await self._emit_action(tool_name, tool_params)
-            observation = await self._execute_tool(tool_name, tool_params)
-            
-            # --- PHASE 3: SELF-CORRECTION LOOP (Recursive Reasoning) ---
-            max_sub_steps = 2
-            for sub_step in range(max_sub_steps):
-                if self._should_self_correct(tool_name, observation):
-                    await self._think(f"Observation suggests potential roadblock. Triggering Self-Correction Protocol (Sub-step {sub_step+1})...", persona=agent.persona_name)
+                reflection_prompt = self._build_reflection_prompt(mission_goal, agent)
+                reflection = await asyncio.to_thread(llm._call_llm, reflection_prompt, self.llm_config)
+                
+                if reflection.startswith("Error:"):
+                    await self._think(f"🚨 REFLECTION ERROR: {reflection}", persona="SYSTEM")
+                    break
                     
-                    correction_prompt = agent.get_correction_prompt(self.context, action, observation)
-                    correction_response = await asyncio.to_thread(llm._call_llm, correction_prompt, self.llm_config)
-                    
-                    new_thought = self._extract_reasoning(correction_response)
-                    new_action = self._extract_action(correction_response)
-                    
-                    if new_thought:
-                        await self._think(f"[REFINED] {new_thought}", persona=agent.persona_name)
-                    
-                    if not new_action or new_action.get("tool") == "finish":
+                if "HANDOVER" in reflection.upper():
+                    new_agent_key = self._determine_handover(reflection)
+                    if new_agent_key and new_agent_key != self.current_agent_key:
+                        await self._think(f"Strategic transition: Handing over from {agent.persona_name} to {self.agents[new_agent_key].persona_name}.")
+                        self.current_agent_key = new_agent_key
+                        agent = self.agents[self.current_agent_key]
+                
+                prompt = agent.get_system_prompt(self.context)
+                response = await asyncio.to_thread(llm._call_llm, prompt, self.llm_config)
+                
+                if response.startswith("Error:"):
+                    await self._think(f"🚨 LLM ERROR: {response}", persona="SYSTEM")
+                    break
+                
+                reasoning = self._extract_reasoning(response)
+                action = self._extract_action(response)
+                
+                if reasoning:
+                    await self._think(reasoning, persona=agent.persona_name)
+                
+                if not action or action.get("tool") == "finish":
+                    if self.current_agent_key == "redteam":
+                        await self._think("Final reports generated. Mission complete.")
                         break
+                    else:
+                        await self._think(f"{agent.persona_name} finished their tasks. Returning to Orchestrator for reassignment.")
+                        self.current_agent_key = "auditor" if self.current_agent_key == "scout" else "redteam"
+                        continue
                     
-                    # Execute refined action
-                    action = new_action
-                    tool_name = action.get("tool")
-                    tool_params = action.get("params", {})
-                    
-                    await self._emit_action(tool_name, tool_params)
-                    observation = await self._execute_tool(tool_name, tool_params)
-                else:
-                    break
+                tool_name = action.get("tool")
+                tool_params = action.get("params", {})
+                await self._emit_action(tool_name, tool_params)
+                observation = await self._execute_tool(tool_name, tool_params)
+                
+                max_sub_steps = 2
+                for sub_step in range(max_sub_steps):
+                    if self._should_self_correct(tool_name, observation):
+                        await self._think(f"Observation suggests roadblock. Self-Correction (Sub-step {sub_step+1})...", persona=agent.persona_name)
+                        correction_prompt = agent.get_correction_prompt(self.context, action, observation)
+                        correction_response = await asyncio.to_thread(llm._call_llm, correction_prompt, self.llm_config)
+                        new_thought = self._extract_reasoning(correction_response)
+                        new_action = self._extract_action(correction_response)
+                        if new_thought:
+                            await self._think(f"[REFINED] {new_thought}", persona=agent.persona_name)
+                        if not new_action or new_action.get("tool") == "finish":
+                            break
+                        action = new_action
+                        tool_name = action.get("tool")
+                        tool_params = action.get("params", {})
+                        await self._emit_action(tool_name, tool_params)
+                        observation = await self._execute_tool(tool_name, tool_params)
+                    else:
+                        break
 
-            # Store history
-            self.context.history.append({
-                "step": step,
-                "agent": agent.persona_name,
-                "thought": reasoning,
-                "action": action,
-                "observation": observation
-            })
+                self.context.history.append({
+                    "step": step,
+                    "agent": agent.persona_name,
+                    "thought": reasoning,
+                    "action": action,
+                    "observation": observation
+                })
+        except Exception as e:
+            err_msg = f"Critical Orchestrator Error: {str(e)}"
+            print(f"[!] {err_msg}")
+            await self._think(err_msg, persona="SYSTEM")
             
             # No delay for maximum speed
 
@@ -234,13 +218,7 @@ Current Agent: {current_agent.persona_name}
 Recent History:
 {history_summary}
 
-Analyze the situation. Should we:
-1. CONTINUE with the current agent?
-2. HANDOVER to another agent? (scout, auditor, redteam)
-
-Current World Model: {json.dumps(self.world_model, indent=2)}
-
-If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond with "CONTINUE".
+Analyze progress. If a handover is needed, respond with "HANDOVER: <agent_key>". Otherwise respond with "CONTINUE". Keep it under 2 sentences.
 """
 
     def _should_self_correct(self, tool: str, observation: Any) -> bool:

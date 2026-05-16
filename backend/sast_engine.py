@@ -84,12 +84,15 @@ class SastEngine:
         print(msg)
         if self.status_callback: self.status_callback(msg)
 
+        limit_reached = False
         for root, dirs, files in os.walk(self.target_dir):
+            if limit_reached: break
             # Skip hidden dirs like .git
             dirs[:] = [d for d in dirs if not d.startswith('.')]
             
             for file in files:
                 if files_scanned >= max_files:
+                    limit_reached = True
                     break
                     
                 ext = os.path.splitext(file)[1].lower()
@@ -109,9 +112,10 @@ class SastEngine:
                     if self.status_callback:
                         self.status_callback(f"[*] Scanning: {rel_path}")
                     
-                    # Cap total context at 100k chars to fit in standard LLM windows (Groq/Llama)
-                    if len(code_context) + len(content) > 100000:
-                         print(f"[*] Context limit reached (100k). Stopping extraction to preserve AI focus.")
+                    # Cap total context at 30k chars for faster local LLM processing
+                    if len(code_context) + len(content) > 30000:
+                         print(f"[*] Context limit reached (30k). Truncating scan for speed.")
+                         limit_reached = True
                          break
                          
                     code_context += f"\n\n--- FILE PATH: {rel_path} ---\n```\n{content[:10000]}\n```\n"

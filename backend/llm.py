@@ -231,7 +231,11 @@ def _call_ollama_dynamic(prompt: str, model: str) -> str:
         client = OllamaClient(host="http://127.0.0.1:11434")
         response = client.generate(
             model=model_name,
-            prompt=prompt
+            prompt=prompt,
+            options={
+                "temperature": 0.1,
+                "num_ctx": 16384,
+            }
         )
         duration = time.time() - start_time
         print(f"[LLM] Ollama response received in {duration:.1f}s")
@@ -464,7 +468,9 @@ def identify_sinks(code_context: str, llm_config: Optional[Dict] = None) -> List
     - impact: (string) What can a malicious actor do? (e.g., "Full DB takeover", "Account Takeover")
     - exploit_scenario: (string) Step-by-step instructions on how to exploit this.
     - manual_poc: (string) A payload or script that proves the vulnerability.
-    - remediation_steps: (string) The exact code fix or architectural change required.
+    - vulnerable_code: (string) The exact snippet of code from the file that contains the vulnerability.
+    - fix_snippet: (string) The corrected version of that code snippet that resolves the security issue.
+    - remediation_steps: (string) High-level explanation of the fix.
     - url_pattern: (string) The relative file path where the bug exists.
     - required_context: (list of strings) Paths to other files needed to trace this bug.
 

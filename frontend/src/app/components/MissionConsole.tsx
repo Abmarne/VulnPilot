@@ -4,16 +4,24 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Zap, X, Shield, Activity } from "lucide-react";
 import type { LLMConfig } from "./ModelSettings";
 
-const getWsUrl = (mode: "autopilot" | "standard" = "autopilot") => {
+const getWsUrl = (mode: "autopilot" | "scan" = "autopilot") => {
   if (process.env.NEXT_PUBLIC_WS_BASE_URL) return `${process.env.NEXT_PUBLIC_WS_BASE_URL}/${mode}/ws`;
   if (typeof window === "undefined") return `ws://localhost:8000/api/${mode}/ws`;
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const host = window.location.hostname === "localhost" ? "localhost:8000" : window.location.host;
-  return `${protocol}//${host}/api/${mode}/ws`;
+  const hostname = window.location.hostname;
+  const port = "8000"; // Backend port
+  
+  const safeHostname = hostname; // Use the hostname exactly as it appears in the browser
+  
+  // If we're on localhost or an IP, explicitly use port 8000
+  if (safeHostname === "localhost" || safeHostname === "127.0.0.1" || /^\d+\.\d+\.\d+\.\d+$/.test(safeHostname)) {
+    return `${protocol}//${safeHostname}:${port}/api/${mode}/ws`;
+  }
+  
+  return `${protocol}//${window.location.host}/api/${mode}/ws`;
 };
 
-const AUTOPILOT_WS = getWsUrl("autopilot");
-const SCAN_WS = getWsUrl("standard");
+// Removed static constants to ensure dynamic resolution during startMission
 
 type MissionPayload = {
   severity?: string;
@@ -23,6 +31,8 @@ type MissionPayload = {
   exploit_scenario?: string;
   manual_poc?: string;
   remediation_steps?: string;
+  vulnerable_code?: string;
+  fix_snippet?: string;
   [key: string]: unknown;
 };
 
@@ -41,7 +51,7 @@ type MissionConsoleProps = {
   llmConfig?: LLMConfig;
   autoStart?: boolean;
   readOnlyData?: any;
-  mode?: "autopilot" | "standard";
+  mode?: "autopilot" | "scan";
 };
 
 export function MissionConsole({ 
@@ -62,6 +72,7 @@ export function MissionConsole({
   const [hitlAnswer, setHitlAnswer] = useState("");
   const [expandedFindings, setExpandedFindings] = useState<Set<string>>(new Set());
   const [missionGoal] = useState("Full vulnerability assessment");
+  const [progress, setProgress] = useState(0);
 
   const ws = useRef<WebSocket | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
@@ -124,7 +135,11 @@ export function MissionConsole({
     scrollToBottom();
   }, [events, scrollToBottom]);
 
-  const addEvent = (type: MissionEvent["type"], message: string, payload?: MissionPayload) => {
+  const hasStarted = useRef(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const MAX_RETRIES = 3;
+
+  const addEvent = useCallback((type: MissionEvent["type"], message: string, payload?: MissionPayload) => {
     setEvents((prev) => [
       ...prev,
       {
@@ -135,17 +150,27 @@ export function MissionConsole({
         timestamp: new Date().toLocaleTimeString([], { hour12: false }),
       },
     ]);
-  };
+  }, []);
 
   const startMission = useCallback(() => {
     if (!target) return;
+    
+    // Safety: close existing socket if any
+    if (ws.current) {
+      if (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING) {
+        try { ws.current.close(); } catch (e) {}
+      }
+      ws.current = null;
+    }
+
     setIsRunning(true);
+    setError(null);
     setEvents([]);
     setBlackboardNotes([]);
-    setError(null);
+    setProgress(5);
     setLastAction("Connecting to engine...");
 
-    const socketUrl = mode === "autopilot" ? AUTOPILOT_WS : SCAN_WS;
+    const socketUrl = getWsUrl(mode);
     const socket = new WebSocket(socketUrl);
     ws.current = socket;
 
@@ -186,6 +211,9 @@ export function MissionConsole({
         });
         addEvent("hitl_request", `Human Intercept Requested: ${data.question}`);
         setLastAction("Waiting for user input...");
+      } else if (data.type === "progress") {
+        setProgress(data.percent || 0);
+        if (data.stage) setLastAction(`Processing ${data.stage}...`);
       } else if (data.type === "mission_complete") {
         addEvent("system", `🏁 Mission complete. Total findings: ${data.finding_count || 0}. Saved to archive.`);
         setIsRunning(false);
@@ -202,31 +230,57 @@ export function MissionConsole({
       }
     };
 
-    socket.onerror = () => {
-      setError("WebSocket connection failed.");
-      setIsRunning(false);
+    socket.onerror = (e) => {
+      console.error("WebSocket Error. readyState:", socket.readyState);
+      if (retryCount < MAX_RETRIES) {
+        setLastAction(`Connection lost. Retrying (${retryCount + 1}/${MAX_RETRIES})...`);
+        setTimeout(() => {
+          setRetryCount(prev => prev + 1);
+          startMission();
+        }, 2000);
+      } else {
+        setError("Could not connect to the security engine. Please ensure the backend is running.");
+        setIsRunning(false);
+      }
     };
-    socket.onclose = () => setIsRunning(false);
-  }, [target, mode, llmConfig, sessionCookie, missionGoal, addEvent]);
 
-  // Auto-start and WebSocket cleanup
+    socket.onclose = (e) => {
+      if (!e.wasClean && retryCount < MAX_RETRIES && isRunning) {
+        // Unintentional closure, try to reconnect
+        setTimeout(() => {
+          setRetryCount(prev => prev + 1);
+          startMission();
+        }, 2000);
+      } else if (e.wasClean || retryCount >= MAX_RETRIES) {
+        setIsRunning(false);
+      }
+    };
+  }, [target, mode, llmConfig, sessionCookie, missionGoal, addEvent, retryCount]);
+
+  // Heartbeat to keep connection alive during long LLM tasks
   useEffect(() => {
-    let active = true;
-    if (autoStart && target) {
-      // Small delay to let StrictMode finish its remount cycle before connecting
-      const timer = setTimeout(() => {
-        if (active) startMission();
-      }, 150);
-    }
+    if (!isRunning || !ws.current) return;
     
+    const interval = setInterval(() => {
+      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+        ws.current.send(JSON.stringify({ type: "PING" }));
+      }
+    }, 20000); // 20 seconds
+    
+    return () => clearInterval(interval);
+  }, [isRunning]);
+
+  useEffect(() => {
     return () => {
-      active = false;
       if (ws.current) {
-        ws.current.close();
+        // Only close if it's open or connecting
+        if (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING) {
+          try { ws.current.close(); } catch (e) {}
+        }
         ws.current = null;
       }
     };
-  }, [autoStart, target, startMission]);
+  }, []);
 
   const toggleFinding = (id: string) => {
     setExpandedFindings((prev) => {
@@ -324,8 +378,8 @@ export function MissionConsole({
                 </p>
                 <div className="h-1 w-32 bg-neutral-800 rounded-full mt-1 overflow-hidden">
                   <div 
-                    className="h-full bg-emerald-500 transition-all duration-1000 ease-in-out" 
-                    style={{ width: `${Math.min(10 + (events.length * 2), 95)}%` }}
+                    className="h-full bg-emerald-500 transition-all duration-1000 ease-in-out shadow-[0_0_8px_rgba(16,185,129,0.4)]" 
+                    style={{ width: `${progress > 0 ? progress : Math.min(10 + (events.length * 2), 95)}%` }}
                   />
                 </div>
               </div>
@@ -548,9 +602,50 @@ export function MissionConsole({
                           </svg>
                           Remediation Advice
                         </div>
-                        <p className="text-sm text-neutral-300 bg-blue-500/5 p-4 rounded-xl border border-blue-500/20 border-dashed">
+                        <p className="text-sm text-neutral-300 bg-blue-500/5 p-4 rounded-xl border border-blue-500/20 border-dashed mb-4">
                           {ev.payload.remediation_steps}
                         </p>
+                        {/* Code Snippets Section */}
+                        {(ev.payload?.vulnerable_code || ev.payload?.fix_snippet) && (
+                          <div className="grid grid-cols-1 gap-4 pt-4 border-t border-white/5">
+                            {ev.payload?.vulnerable_code && (
+                              <div className="space-y-1.5">
+                                <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-red-400">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                                  Vulnerable Code
+                                </div>
+                                <pre className="bg-red-500/5 p-4 rounded-xl text-[11px] font-mono text-red-200 overflow-x-auto border border-red-500/20 max-h-[200px] scrollbar-thin">
+                                  {ev.payload.vulnerable_code}
+                                </pre>
+                              </div>
+                            )}
+                            {ev.payload?.fix_snippet && (
+                              <div className="space-y-1.5">
+                                <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-emerald-400">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                  Suggested Fix
+                                </div>
+                                <div className="group/fix relative">
+                                  <pre className="bg-emerald-500/5 p-4 rounded-xl text-[11px] font-mono text-emerald-200 overflow-x-auto border border-emerald-500/20 max-h-[200px] scrollbar-thin">
+                                    {ev.payload.fix_snippet}
+                                  </pre>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      navigator.clipboard.writeText(ev.payload?.fix_snippet || "");
+                                    }}
+                                    className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/5 opacity-0 group-hover/fix:opacity-100 transition-opacity hover:bg-emerald-500/20 text-emerald-400"
+                                    title="Copy Fix"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -595,23 +690,21 @@ export function MissionConsole({
         ))}
       </div>
 
-      {/* Control Panel - show only when not running */}
-      {!isRunning && (
-        <div className="p-4 border-t border-neutral-800 bg-neutral-900/60">
-          {error && (
-            <div className="mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
-              <strong>Engine Error:</strong> {error}
-            </div>
-          )}
-          <button
-            onClick={startMission}
-            disabled={isRunning || !target}
-            className="w-full py-3 rounded-xl font-black uppercase tracking-widest text-sm bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:scale-[1.01] active:scale-[0.99] transition-all shadow-lg"
-          >
-            {events.length > 0 ? "Re-run Audit" : "Start Security Audit"}
-          </button>
-        </div>
-      )}
+      {/* Control Panel - Always visible but blurred when running */}
+      <div className={`p-4 border-t border-neutral-800 bg-neutral-900/60 transition-all duration-500 ${isRunning ? 'opacity-50 blur-[1px] pointer-events-none scale-[0.98]' : 'opacity-100'}`}>
+        {error && !isRunning && (
+          <div className="mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
+            <strong>Engine Error:</strong> {error}
+          </div>
+        )}
+        <button
+          onClick={startMission}
+          disabled={isRunning || !target}
+          className="w-full py-3 rounded-xl font-black uppercase tracking-widest text-sm bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:scale-[1.01] active:scale-[0.99] transition-all shadow-lg"
+        >
+          {isRunning ? "Audit in Progress..." : (events.length > 0 ? "Re-run Audit" : "Start Security Audit")}
+        </button>
+      </div>
       {isRunning && error && (
         <div className="p-4 border-t border-neutral-800">
           <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">

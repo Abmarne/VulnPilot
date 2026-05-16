@@ -58,7 +58,10 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def send_personal_message(self, message: dict, websocket: WebSocket):
-        await websocket.send_json(message)
+        try:
+            await websocket.send_json(message)
+        except Exception:
+            self.disconnect(websocket)
 
 
 manager = ConnectionManager()
@@ -206,6 +209,7 @@ async def get_history_detail(scan_id: str):
 
 @app.websocket("/api/scan/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    print(f"\n[WebSocket] Incoming connection to /api/scan/ws from {websocket.client}")
     await manager.connect(websocket)
     try:
         while True:
@@ -284,6 +288,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.websocket("/api/autopilot/ws")
 async def autopilot_websocket(websocket: WebSocket):
+    print(f"\n[WebSocket] Incoming connection to /api/autopilot/ws from {websocket.client}")
     """Autonomous Security Pilot WebSocket endpoint."""
     await manager.connect(websocket)
     hitl_future: Optional[asyncio.Future] = None
@@ -308,19 +313,28 @@ async def autopilot_websocket(websocket: WebSocket):
                 mission_logs = []
 
                 async def handle_thought(text: str):
-                    mission_logs.append({"message": text, "stage": "autopilot"})
-                    if text.startswith("[System] Blackboard updated:"):
-                        await manager.send_personal_message({"type": "blackboard_note", "message": text}, websocket)
-                    else:
-                        await manager.send_personal_message({"type": "thought", "message": text}, websocket)
+                    try:
+                        mission_logs.append({"message": text, "stage": "autopilot"})
+                        if text.startswith("[System] Blackboard updated:"):
+                            await manager.send_personal_message({"type": "blackboard_note", "message": text}, websocket)
+                        else:
+                            await manager.send_personal_message({"type": "thought", "message": text}, websocket)
+                    except:
+                        pass
 
                 async def handle_action(tool: str, params: Any):
-                    mission_logs.append({"message": f"Action: {tool}", "stage": "autopilot"})
-                    await manager.send_personal_message({"type": "action", "tool": tool, "params": params}, websocket)
+                    try:
+                        mission_logs.append({"message": f"Action: {tool}", "stage": "autopilot"})
+                        await manager.send_personal_message({"type": "action", "tool": tool, "params": params}, websocket)
+                    except:
+                        pass
 
                 async def handle_finding(finding: Dict[str, Any]):
-                    mission_findings.append(finding)
-                    await manager.send_personal_message({"type": "finding", "data": finding}, websocket)
+                    try:
+                        mission_findings.append(finding)
+                        await manager.send_personal_message({"type": "finding", "data": finding}, websocket)
+                    except:
+                        pass
                 
                 async def handle_human_intercept(question: str) -> str:
                     nonlocal hitl_future
@@ -375,8 +389,13 @@ async def autopilot_websocket(websocket: WebSocket):
                     hitl_future.set_result(answer)
 
     except WebSocketDisconnect:
-        if mission_task and not mission_task.done():
-            mission_task.cancel()
+        manager.disconnect(websocket)
+    except Exception as e:
+        print(f"[!] WebSocket Route Error: {e}")
+        try:
+            await manager.send_personal_message({"type": "autopilot_error", "error": str(e)}, websocket)
+        except:
+            pass
         manager.disconnect(websocket)
     except Exception as exc:
         if mission_task and not mission_task.done():
@@ -403,4 +422,12 @@ async def debug_sast(codebase_path: str):
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    try:
+        uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    except Exception as e:
+        print(f"\n[!!!] CRITICAL SERVER CRASH: {e}")
+        import traceback
+        traceback.print_exc()
+        # Keep window open briefly on crash
+        import time
+        time.sleep(10)
