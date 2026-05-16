@@ -100,6 +100,42 @@ python cli.py --target "./workspace" --apply-fix
 
 ---
 
+## 🐳 Docker Deployment (Recommended)
+
+The easiest way to run VulnPilot in a production-like environment is using Docker Compose.
+
+1. **Configure Environment**: 
+   - Copy `backend/.env.example` to `backend/.env` and add your API keys.
+   - (Optional) Copy `frontend/.env.local.example` to `frontend/.env.local`.
+
+2. **Launch**:
+   ```bash
+   docker-compose up --build
+   ```
+
+3. **Access**:
+   - Frontend: `http://localhost:3000`
+   - Backend API: `http://localhost:8000`
+
+---
+
+## ⚙️ Environment Variables
+
+### Backend (`backend/.env`)
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GOOGLE_API_KEY` | Gemini API Key | Required |
+| `GROQ_API_KEY` | Groq API Key | Required |
+| `DATABASE_URL` | SQLAlchemy DB URL | `sqlite:///vulnpilot.db` |
+
+### Frontend (`frontend/.env.local`)
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `NEXT_PUBLIC_API_BASE_URL` | Backend API URL | `http://localhost:8000` |
+| `NEXT_PUBLIC_WS_BASE_URL` | Backend WS URL | `ws://localhost:8000/api` |
+
+---
+
 ## 🏗️ Architecture Stack
 
 VulnPilot is built on a mission-critical stack designed for speed and intelligence.

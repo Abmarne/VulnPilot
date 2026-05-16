@@ -7,6 +7,7 @@ import { ModelSettings, LLMConfig } from "./components/ModelSettings";
 import { SourceHub } from "./components/SourceHub";
 
 const getApiBase = () => {
+  if (process.env.NEXT_PUBLIC_API_BASE_URL) return process.env.NEXT_PUBLIC_API_BASE_URL;
   if (typeof window === "undefined") return "http://localhost:8000";
   // If we are on localhost:3000 (Next.js default), assume backend is on 8000
   if (window.location.hostname === "localhost") return "http://localhost:8000";

@@ -3,8 +3,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 
-# SQLite database file path
-DB_PATH = "sqlite:///vulnpilot.db"
+# SQLite database file path (Default to local file, can be overridden by env)
+DB_PATH = os.getenv("DATABASE_URL", "sqlite:///vulnpilot.db")
 
 engine = create_engine(DB_PATH, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

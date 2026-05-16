@@ -5,6 +5,7 @@ import { Zap, X, Shield, Activity } from "lucide-react";
 import type { LLMConfig } from "./ModelSettings";
 
 const getWsUrl = (mode: "autopilot" | "standard" = "autopilot") => {
+  if (process.env.NEXT_PUBLIC_WS_BASE_URL) return `${process.env.NEXT_PUBLIC_WS_BASE_URL}/${mode}/ws`;
   if (typeof window === "undefined") return `ws://localhost:8000/api/${mode}/ws`;
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = window.location.hostname === "localhost" ? "localhost:8000" : window.location.host;
