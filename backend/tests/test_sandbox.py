@@ -1,9 +1,10 @@
-from backend.sandbox import SandboxManager
 import sys
 import os
 
-# Add parent dir to path so we can import backend.sandbox
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add project root to path so we can import backend.sandbox
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from backend.sandbox import SandboxManager
 
 def test_sqli_vulnerable():
     print("Testing SQLi Vulnerable Code...")

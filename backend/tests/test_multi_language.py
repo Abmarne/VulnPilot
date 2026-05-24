@@ -1,13 +1,14 @@
-from backend.sandbox import SandboxManager
-from backend.dependency_scanner import DependencyScanner
 import sys
 import os
 import shutil
 import tempfile
 import json
 
-# Add parent dir to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add project root to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from backend.sandbox import SandboxManager
+from backend.dependency_scanner import DependencyScanner
 
 def test_node_sandbox_vulnerable():
     print("Testing Node.js Vulnerable Code...")
@@ -78,12 +79,140 @@ require github.com/gin-gonic/gin v1.9.0
     finally:
         shutil.rmtree(tmp_dir)
 
+def test_php_sandbox_vulnerable():
+    print("\nTesting PHP SQLi Vulnerable Code...")
+    code = """<?php
+$uid = $_GET['id'];
+$db = new PDO("mysql:host=localhost;dbname=test", "user", "pass");
+$db->query("SELECT * FROM users WHERE id = " . $uid);
+"""
+    sb = SandboxManager()
+    if not sb._is_binary_available("php"):
+        print("PHP binary not found, skipping.")
+        return
+    is_success, msg = sb.verify_exploit(code, "1 OR 1=1", "sql_injection")
+    print(f"Exploit Success: {is_success}")
+    print(f"Message: {msg}")
+    assert is_success == True
+
+def test_php_sandbox_secure():
+    print("\nTesting PHP SQLi Secure Code...")
+    code = """<?php
+$uid = $_GET['id'];
+$db = new PDO("mysql:host=localhost;dbname=test", "user", "pass");
+$stmt = $db->prepare("SELECT * FROM users WHERE id = ?");
+$stmt->execute([$uid]);
+"""
+    sb = SandboxManager()
+    if not sb._is_binary_available("php"):
+        print("PHP binary not found, skipping.")
+        return
+    is_success, msg = sb.verify_exploit(code, "1 OR 1=1", "sql_injection")
+    print(f"Exploit Success: {is_success}")
+    print(f"Message: {msg}")
+    assert is_success == False
+
+def test_go_sandbox_vulnerable():
+    print("\nTesting Go SQLi Vulnerable Code...")
+    code = """package main
+import (
+    "database/sql"
+    "fmt"
+    "os"
+)
+func main() {
+    db, _ := sql.Open("mysql", "connstring")
+    uid := os.Args[1]
+    query := fmt.Sprintf("SELECT * FROM users WHERE id = %s", uid)
+    db.Query(query)
+}
+"""
+    sb = SandboxManager()
+    if not sb._is_binary_available("go"):
+        print("Go binary not found, skipping.")
+        return
+    is_success, msg = sb.verify_exploit(code, "1 OR 1=1", "sql_injection")
+    print(f"Exploit Success: {is_success}")
+    print(f"Message: {msg}")
+    assert is_success == True
+
+def test_go_sandbox_secure():
+    print("\nTesting Go SQLi Secure Code...")
+    code = """package main
+import (
+    "database/sql"
+    "os"
+)
+func main() {
+    db, _ := sql.Open("mysql", "connstring")
+    uid := os.Args[1]
+    db.Query("SELECT * FROM users WHERE id = ?", uid)
+}
+"""
+    sb = SandboxManager()
+    if not sb._is_binary_available("go"):
+        print("Go binary not found, skipping.")
+        return
+    is_success, msg = sb.verify_exploit(code, "1 OR 1=1", "sql_injection")
+    print(f"Exploit Success: {is_success}")
+    print(f"Message: {msg}")
+    assert is_success == False
+
+def test_java_sandbox_vulnerable():
+    print("\nTesting Java SQLi Vulnerable Code...")
+    code = """import java.sql.*;
+public class TestVulnerable {
+    public static void main(String[] args) throws Exception {
+        Connection conn = DriverManager.getConnection("jdbc:mysql://localhost/test", "user", "pass");
+        String uid = args[0];
+        Statement stmt = conn.createStatement();
+        stmt.executeQuery("SELECT * FROM users WHERE id = " + uid);
+    }
+}
+"""
+    sb = SandboxManager()
+    if not sb._is_binary_available("java") or not sb._is_binary_available("javac"):
+        print("Java/Javac binary not found, skipping.")
+        return
+    is_success, msg = sb.verify_exploit(code, "1 OR 1=1", "sql_injection")
+    print(f"Exploit Success: {is_success}")
+    print(f"Message: {msg}")
+    assert is_success == True
+
+def test_java_sandbox_secure():
+    print("\nTesting Java SQLi Secure Code...")
+    code = """import java.sql.*;
+public class TestSecure {
+    public static void main(String[] args) throws Exception {
+        Connection conn = DriverManager.getConnection("jdbc:mysql://localhost/test", "user", "pass");
+        String uid = args[0];
+        PreparedStatement stmt = conn.prepareStatement("SELECT * FROM users WHERE id = ?");
+        stmt.setString(1, uid);
+        stmt.execute();
+    }
+}
+"""
+    sb = SandboxManager()
+    if not sb._is_binary_available("java") or not sb._is_binary_available("javac"):
+        print("Java/Javac binary not found, skipping.")
+        return
+    is_success, msg = sb.verify_exploit(code, "1 OR 1=1", "sql_injection")
+    print(f"Exploit Success: {is_success}")
+    print(f"Message: {msg}")
+    assert is_success == False
+
 if __name__ == "__main__":
     try:
         test_node_sandbox_vulnerable()
         test_node_sandbox_secure()
         test_python_regression()
         test_sca_go_support()
+        test_php_sandbox_vulnerable()
+        test_php_sandbox_secure()
+        test_go_sandbox_vulnerable()
+        test_go_sandbox_secure()
+        test_java_sandbox_vulnerable()
+        test_java_sandbox_secure()
         print("\nALL multi-language tests passed!")
     except Exception as e:
         print(f"\nTest failed!")
